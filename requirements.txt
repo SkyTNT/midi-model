@@ -1,0 +1,6 @@
+Pillow
+numpy
+torch
+transformers
+pytorch_lightning
+gradio
