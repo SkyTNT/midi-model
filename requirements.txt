@@ -4,3 +4,4 @@ torch
 transformers
 pytorch_lightning
 gradio
+pyfluidsynth

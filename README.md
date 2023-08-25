@@ -14,9 +14,9 @@
 
 ## Requirements
 
-You need to [install pytorch](https://pytorch.org/) first (recommend pytorch>=2.0)
-
-Then `pip install -r requirements.txt`
+- install [pytorch](https://pytorch.org/)(recommend pytorch>=2.0)
+- install [fluidsynth](https://www.fluidsynth.org/)>=2.0.0
+- `pip install -r requirements.txt`
 
 ## Run app
 
