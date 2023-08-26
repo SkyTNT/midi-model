@@ -4,9 +4,14 @@
 
 ![](./banner.png)
 
+## Online demo
+
+[huggingface](https://huggingface.co/spaces/skytnt/midi-composer)
+[colab]((https://colab.research.google.com/drive/1x0iZkVakn3VBouIMXuzQ2OFhqYiAA3UE?usp=sharing))
+
 ## Pretrained model
 
-[huggingface](https://huggingface.co/skytnt/midi-model)
+[huggingface](https://huggingface.co/skytnt/midi-model/blob/main/model.ckpt)
 
 ## Dataset
 
