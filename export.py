@@ -59,7 +59,7 @@ if __name__ == '__main__':
     opt = parser.parse_args()
     tokenizer = MIDITokenizer()
     model = MIDIModel(tokenizer).to(device="cpu")
-    ckpt = torch.load("model.ckpt", map_location="cpu")
+    ckpt = torch.load(opt.ckpt, map_location="cpu")
     state_dict = ckpt.get("state_dict", ckpt)
     model.load_state_dict(state_dict, strict=False)
     model.eval()
@@ -71,7 +71,7 @@ if __name__ == '__main__':
                                                        "hidden": {0: "batch", 1: "mid_seq", 2: "emb"}},
                     opt.model_base_out)
 
-        hidden = torch.randn(1, 1024, device="cuda")
+        hidden = torch.randn(1, 1024, device="cpu")
         x = torch.randint(tokenizer.vocab_size, (1, tokenizer.max_token_seq), dtype=torch.int64, device="cpu")
         export_onnx(model_token, (hidden, x), ["hidden", "x"], ["y"], {"x": {0: "batch", 1: "token_seq"},
                                                                        "hidden": {0: "batch", 1: "emb"},

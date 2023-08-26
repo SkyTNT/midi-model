@@ -1,15 +1,22 @@
 import argparse
+import os.path
 
 import PIL
-import scipy
 import gradio as gr
 import numpy as np
 import onnxruntime as rt
+import requests
 import tqdm
 
 import MIDI
 from midi_tokenizer import MIDITokenizer
 from midi_synthesizer import synthesis
+
+
+def softmax(x, axis):
+    x_max = np.amax(x, axis=axis, keepdims=True)
+    exp_x_shifted = np.exp(x - x_max)
+    return exp_x_shifted / np.sum(exp_x_shifted, axis=axis, keepdims=True)
 
 
 def sample_top_p_k(probs, p, k):
@@ -71,7 +78,7 @@ def generate(prompt=None, max_len=512, temp=1.0, top_p=0.98, top_k=20,
                         mask_ids = [i for i in mask_ids if i not in disable_channels]
                     mask[mask_ids] = 1
                 logits = model_token.run(None, {'x': next_token_seq, "hidden": hidden})[0][:, -1:]
-                scores = scipy.special.softmax(logits / temp, axis=-1) * mask
+                scores = softmax(logits / temp, -1) * mask
                 sample = sample_top_p_k(scores, top_p, top_k)
                 if i == 0:
                     next_token_seq = sample
@@ -184,6 +191,24 @@ def cancel_run(mid_seq):
     return "output.mid", (44100, audio)
 
 
+def download(url, output_file):
+    response = requests.get(url, stream=True)
+    file_size = int(response.headers.get("Content-Length", 0))
+    with tqdm.tqdm(total=file_size, unit="B", unit_scale=True, unit_divisor=1024,
+                   desc=f"Downloading {output_file}") as pbar:
+        with open(output_file, "wb") as f:
+            for chunk in response.iter_content(chunk_size=1024):
+                if chunk:
+                    f.write(chunk)
+                    pbar.update(len(chunk))
+
+
+def download_if_not_exit(url, output_file):
+    if os.path.exists(output_file):
+        return
+    download(url, output_file)
+
+
 number2drum_kits = {-1: "None", 0: "Standard", 8: "Room", 16: "Power", 24: "Electric", 25: "TR-808", 32: "Jazz",
                     40: "Blush", 48: "Orchestra"}
 patch2number = {v: k for k, v in MIDI.Number2patch.items()}
@@ -192,16 +217,40 @@ drum_kits2number = {v: k for k, v in number2drum_kits.items()}
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--share", action="store_true", default=False, help="share gradio app")
-    parser.add_argument("--port", type=int, default=7860, help="gradio server port")
+    parser.add_argument("--port", type=int, default=-1, help="gradio server port")
     parser.add_argument("--max-gen", type=int, default=4096, help="max")
     parser.add_argument("--soundfont-path", type=str, default="soundfont.sf2", help="soundfont")
     parser.add_argument("--model-base-path", type=str, default="model_base.onnx", help="model path")
     parser.add_argument("--model-token-path", type=str, default="model_token.onnx", help="model path")
+    parser.add_argument("--soundfont-url", type=str,
+                        default="https://huggingface.co/skytnt/midi-model/resolve/main/soundfont.sf2",
+                        help="download soundfont to soundfont-path if file not exist")
+    parser.add_argument("--model-base-url", type=str,
+                        default="https://huggingface.co/skytnt/midi-model/resolve/main/onnx/model_base.onnx",
+                        help="download model-base to model-base-path if file not exist")
+    parser.add_argument("--model-token-url", type=str,
+                        default="https://huggingface.co/skytnt/midi-model/resolve/main/onnx/model_token.onnx",
+                        help="download model-token to model-token-path if file not exist")
     opt = parser.parse_args()
+
+    try:
+        download_if_not_exit(opt.soundfont_url, opt.soundfont_path)
+        download_if_not_exit(opt.model_base_url, opt.model_base_path)
+        download_if_not_exit(opt.model_token_url, opt.model_token_path)
+    except Exception as e:
+        print(e)
+        input("Failed to download files.\nPress any key to continue...")
+        exit(-1)
+
     tokenizer = MIDITokenizer()
     providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
-    model_base = rt.InferenceSession(opt.model_base_path, providers=providers)
-    model_token = rt.InferenceSession(opt.model_token_path, providers=providers)
+    try:
+        model_base = rt.InferenceSession(opt.model_base_path, providers=providers)
+        model_token = rt.InferenceSession(opt.model_token_path, providers=providers)
+    except Exception as e:
+        print(e)
+        input("Failed to load models, maybe you need to delete them and re-download it.\nPress any key to continue...")
+        exit(-1)
 
     app = gr.Blocks()
     with app:
@@ -233,16 +282,24 @@ if __name__ == "__main__":
         input_temp = gr.Slider(label="temperature", minimum=0.1, maximum=1.2, step=0.01, value=1)
         input_top_p = gr.Slider(label="top p", minimum=0.1, maximum=1, step=0.01, value=0.97)
         input_top_k = gr.Slider(label="top k", minimum=1, maximum=50, step=1, value=20)
-        input_allow_cc = gr.Checkbox(label="allow control change event", value=True)
+        input_allow_cc = gr.Checkbox(label="allow midi cc event", value=True)
         run_btn = gr.Button("generate", variant="primary")
         stop_btn = gr.Button("stop")
         output_midi_seq = gr.Variable()
         output_midi_img = gr.Image(label="output image")
         output_midi = gr.File(label="output midi", file_types=[".mid"])
-        output_audio = gr.Audio(label="output audio", format="mp3")
+        output_audio = gr.Audio(label="output audio", format="wav")
         run_event = run_btn.click(run, [tab_select, input_instruments, input_drum_kit, input_midi, input_midi_events,
                                         input_gen_events, input_temp, input_top_p, input_top_k,
                                         input_allow_cc],
                                   [output_midi_seq, output_midi_img, output_midi, output_audio])
         stop_btn.click(cancel_run, output_midi_seq, [output_midi, output_audio], cancels=run_event, queue=False)
-    app.queue(1).launch(server_port=opt.port, share=opt.share, inbrowser=True)
+    try:
+        port = opt.port
+        if port == -1:
+            port = None
+        app.queue(1).launch(server_port=port, share=opt.share, inbrowser=True)
+    except Exception as e:
+        print(e)
+        input("Failed to launch webui.\nPress any key to continue...")
+        exit(-1)
