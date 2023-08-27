@@ -2,6 +2,7 @@ import argparse
 import os.path
 
 import PIL
+import PIL.ImageColor
 import gradio as gr
 import numpy as np
 import onnxruntime as rt
@@ -9,8 +10,8 @@ import requests
 import tqdm
 
 import MIDI
-from midi_tokenizer import MIDITokenizer
 from midi_synthesizer import synthesis
+from midi_tokenizer import MIDITokenizer
 
 
 def softmax(x, axis):
@@ -109,8 +110,9 @@ def run(tab, instruments, drum_kit, mid, midi_events, gen_events, temp, top_p, t
     img_len = 1024
     img = np.full((128 * 2, img_len, 3), 255, dtype=np.uint8)
     state = {"t1": 0, "t": 0, "cur_pos": 0}
-    rand = np.random.RandomState(0)
-    colors = {(i, j): rand.randint(0, 200, 3) for i in range(128) for j in range(16)}
+    colors = ['red', 'yellow', 'green', 'cyan', 'blue', 'pink', 'orange', 'purple',
+              'gray', 'white', 'gold', 'silver', 'aqua', 'azure', 'bisque', 'coral']
+    colors = [PIL.ImageColor.getrgb(color) for color in colors]
 
     def draw_event(tokens):
         if tokens[0] in tokenizer.id_events:
@@ -133,7 +135,7 @@ def run(tab, instruments, drum_kit, mid, midi_events, gen_events, temp, top_p, t
                     img[:, -shift:] = 255
                     state["cur_pos"] += shift
                 t = t - state["cur_pos"]
-                img[p * 2:(p + 1) * 2, t: t + d] = colors[(tr, c)]
+                img[p * 2:(p + 1) * 2, t: t + d] = colors[c]
 
     def get_img():
         t = state["t"] - state["cur_pos"]
@@ -280,7 +282,7 @@ if __name__ == "__main__":
         input_gen_events = gr.Slider(label="generate n midi events", minimum=1, maximum=opt.max_gen,
                                      step=1, value=opt.max_gen)
         input_temp = gr.Slider(label="temperature", minimum=0.1, maximum=1.2, step=0.01, value=1)
-        input_top_p = gr.Slider(label="top p", minimum=0.1, maximum=1, step=0.01, value=0.97)
+        input_top_p = gr.Slider(label="top p", minimum=0.1, maximum=1, step=0.01, value=0.98)
         input_top_k = gr.Slider(label="top k", minimum=1, maximum=50, step=1, value=20)
         input_allow_cc = gr.Checkbox(label="allow midi cc event", value=True)
         run_btn = gr.Button("generate", variant="primary")
