@@ -1,11 +1,12 @@
 import argparse
 import os.path
+from sys import exit
 
-import PIL
-import PIL.ImageColor
 import gradio as gr
 import numpy as np
 import onnxruntime as rt
+import PIL
+import PIL.ImageColor
 import requests
 import tqdm
 
@@ -110,8 +111,8 @@ def run(tab, instruments, drum_kit, mid, midi_events, gen_events, temp, top_p, t
     img_len = 1024
     img = np.full((128 * 2, img_len, 3), 255, dtype=np.uint8)
     state = {"t1": 0, "t": 0, "cur_pos": 0}
-    colors = ['red', 'yellow', 'green', 'cyan', 'blue', 'pink', 'orange', 'purple',
-              'gray', 'white', 'gold', 'silver', 'aqua', 'azure', 'bisque', 'coral']
+    colors = ['navy', 'blue', 'deepskyblue', 'teal', 'green', 'lightgreen', 'lime', 'orange',
+              'brown', 'grey', 'red', 'pink', 'aqua', 'orchid', 'bisque', 'coral']
     colors = [PIL.ImageColor.getrgb(color) for color in colors]
 
     def draw_event(tokens):
@@ -208,7 +209,11 @@ def download(url, output_file):
 def download_if_not_exit(url, output_file):
     if os.path.exists(output_file):
         return
-    download(url, output_file)
+    try:
+        download(url, output_file)
+    except Exception as e:
+        print(f"Failed to download {output_file} from {url}")
+        raise e
 
 
 number2drum_kits = {-1: "None", 0: "Standard", 8: "Room", 16: "Power", 24: "Electric", 25: "TR-808", 32: "Jazz",
@@ -262,7 +267,8 @@ if __name__ == "__main__":
                     "Demo for [SkyTNT/midi-model](https://github.com/SkyTNT/midi-model)\n\n"
                     "[Open In Colab]"
                     "(https://colab.research.google.com/github/SkyTNT/midi-model/blob/main/demo.ipynb)"
-                    " for faster running")
+                    " for faster running"
+                    )
 
         tab_select = gr.Variable(value=0)
         with gr.Tabs():
