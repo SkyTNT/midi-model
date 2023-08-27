@@ -4,10 +4,13 @@
 
 ![](./banner.png)
 
-## Online demo
+## Demo
 
-[huggingface](https://huggingface.co/spaces/skytnt/midi-composer)
-[colab](https://colab.research.google.com/github/SkyTNT/midi-model/blob/main/demo.ipynb)
+- [online: huggingface](https://huggingface.co/spaces/skytnt/midi-composer)
+
+- [online: colab](https://colab.research.google.com/github/SkyTNT/midi-model/blob/main/demo.ipynb)
+
+- [download windows app](https://github.com/SkyTNT/midi-model/releases)
 
 ## Pretrained model
 
