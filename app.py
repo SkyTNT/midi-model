@@ -210,9 +210,21 @@ if __name__ == "__main__":
         with gr.Tabs():
             with gr.TabItem("instrument prompt") as tab1:
                 input_instruments = gr.Dropdown(label="instruments (auto if empty)", choices=list(patch2number.keys()),
-                                                multiselect=True, max_choices=10, type="value")
+                                                multiselect=True, max_choices=15, type="value")
                 input_drum_kit = gr.Dropdown(label="drum kit", choices=list(drum_kits2number.keys()), type="value",
                                              value="None")
+                example1 = gr.Examples([
+                    [[], "None"],
+                    [["Acoustic Grand"], "None"],
+                    [["Acoustic Grand", "Violin", "Viola", "Cello", "Contrabass", "Timpani"], "Orchestra"],
+                    [["Acoustic Guitar(nylon)", "Acoustic Guitar(steel)", "Electric Guitar(jazz)",
+                      "Electric Guitar(clean)", "Electric Guitar(muted)", "Overdriven Guitar", "Distortion Guitar",
+                      "Electric Bass(finger)"], "Standard"],
+                    [["Flute", "Cello", "Bassoon", "Tuba"], "None"],
+                    [["Acoustic Grand", "String Ensemble 1", "Trombone", "Tuba", "Muted Trumpet", "French Horn", "Oboe",
+                      "English Horn", "Bassoon", "Clarinet"], "Orchestra"]
+
+                ], [input_instruments, input_drum_kit])
             with gr.TabItem("midi prompt") as tab2:
                 input_midi = gr.File(label="input midi", file_types=[".midi", ".mid"], type="binary")
                 input_midi_events = gr.Slider(label="use first n midi events as prompt", minimum=1, maximum=512,
@@ -222,13 +234,15 @@ if __name__ == "__main__":
         tab1.select(lambda: 0, None, tab_select, queue=False)
         tab2.select(lambda: 1, None, tab_select, queue=False)
         input_gen_events = gr.Slider(label="generate n midi events", minimum=1, maximum=4096, step=1, value=512)
-        input_temp = gr.Slider(label="temperature", minimum=0.1, maximum=1.2, step=0.01, value=1)
-        input_top_p = gr.Slider(label="top p", minimum=0.1, maximum=1, step=0.01, value=0.97)
-        input_top_k = gr.Slider(label="top k", minimum=1, maximum=50, step=1, value=20)
-        input_allow_cc = gr.Checkbox(label="allow control change event", value=True)
-        input_amp = gr.Checkbox(label="enable amp", value=True)
+        with gr.Accordion("options", open=False):
+            input_temp = gr.Slider(label="temperature", minimum=0.1, maximum=1.2, step=0.01, value=1)
+            input_top_p = gr.Slider(label="top p", minimum=0.1, maximum=1, step=0.01, value=0.98)
+            input_top_k = gr.Slider(label="top k", minimum=1, maximum=20, step=1, value=12)
+            input_allow_cc = gr.Checkbox(label="allow midi cc event", value=True)
+            input_amp = gr.Checkbox(label="enable amp", value=True)
+            example3 = gr.Examples([[1, 0.98, 12], [1.2, 0.95, 8]], [input_temp, input_top_p, input_top_k])
         run_btn = gr.Button("generate", variant="primary")
-        stop_btn = gr.Button("stop", variant="primary")
+        stop_btn = gr.Button("stop and output")
         output_midi_seq = gr.Variable()
         output_midi_img = gr.Image(label="output image")
         output_midi = gr.File(label="output midi", file_types=[".mid"])
