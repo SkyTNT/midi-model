@@ -206,15 +206,16 @@ class MIDITokenizer:
             midi_seq_new.append(tokens_new)
         return midi_seq_new
 
-    def check_alignment(self, midi_seq, threshold=0.25):
+    def check_alignment(self, midi_seq, threshold=0.4):
         total = 0
-        aligned = 0
+        hist = [0] * 16
         for tokens in midi_seq:
-            if tokens[0] in self.id_events:
+            if tokens[0] in self.id_events and self.id_events[tokens[0]] == "note":
                 t2 = tokens[2] - self.parameter_ids["time2"][0]
                 total += 1
-                if t2 % 8 == 0:
-                    aligned += 1
+                hist[t2] += 1
         if total == 0:
             return False
-        return aligned / total > threshold
+        hist = sorted(hist, reverse=True)
+        p = sum(hist[:2]) / total
+        return p > threshold

@@ -26,18 +26,10 @@ def file_ext(fname):
 
 
 class MidiDataset(Dataset):
-    def __init__(self, path, tokenizer: MIDITokenizer, max_len=2048, aug=True, check_alignment=True):
-        all_files = {
-            os.path.relpath(os.path.join(root, fname), path)
-            for root, _dirs, files in os.walk(path)
-            for fname in files
-        }
-        all_midis = sorted(
-            fname for fname in all_files if file_ext(fname) in EXTENSION
-        )
-        self.path = path
+    def __init__(self, midi_list, tokenizer: MIDITokenizer, max_len=2048, aug=True, check_alignment=True):
+
         self.tokenizer = tokenizer
-        self.midi_list = all_midis
+        self.midi_list = midi_list
         self.max_len = max_len
         self.aug = aug
         self.check_alignment = check_alignment
@@ -46,8 +38,7 @@ class MidiDataset(Dataset):
         return len(self.midi_list)
 
     def load_midi(self, index):
-        fname = self.midi_list[index]
-        path = os.path.join(self.path, fname)
+        path = self.midi_list[index]
         try:
             with open(path, 'rb') as f:
                 mid = MIDI.midi2score(f.read())
@@ -202,6 +193,18 @@ class TrainMIDIModel(MIDIModel):
         torch.cuda.empty_cache()
 
 
+def get_midi_list(path):
+    all_files = {
+        os.path.join(root, fname)
+        for root, _dirs, files in os.walk(path)
+        for fname in files
+    }
+    all_midis = sorted(
+        fname for fname in all_files if file_ext(fname) in EXTENSION
+    )
+    return all_midis
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     # model args
@@ -287,13 +290,14 @@ if __name__ == '__main__':
     pl.seed_everything(opt.seed)
     print("---load dataset---")
     tokenizer = MIDITokenizer()
-    full_dataset = MidiDataset(opt.data, tokenizer, max_len=opt.max_len)
-    full_dataset_len = len(full_dataset)
+    midi_list = get_midi_list(opt.data)
+    random.shuffle(midi_list)
+    full_dataset_len = len(midi_list)
     train_dataset_len = full_dataset_len - opt.data_val_split
-    val_dataset_len = full_dataset_len - train_dataset_len
-    train_dataset, val_dataset = torch.utils.data.random_split(
-        full_dataset, [train_dataset_len, val_dataset_len]
-    )
+    train_midi_list = midi_list[:train_dataset_len]
+    val_midi_list = midi_list[train_dataset_len:]
+    train_dataset = MidiDataset(train_midi_list, tokenizer, max_len=opt.max_len)
+    val_dataset = MidiDataset(val_midi_list, tokenizer, max_len=opt.max_len, aug=False)
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=opt.batch_size_train,
@@ -310,7 +314,7 @@ if __name__ == '__main__':
         num_workers=opt.workers_val,
         pin_memory=True,
     )
-    print(f"train: {len(full_dataset)}")
+    print(f"train: {len(train_dataset)}  val: {len(val_dataset)}")
     model = TrainMIDIModel(tokenizer, flash=True, lr=opt.lr, weight_decay=opt.weight_decay,
                            warmup=opt.warmup_step, max_step=opt.max_step)
     if opt.ckpt:
