@@ -26,7 +26,7 @@ def file_ext(fname):
 
 
 class MidiDataset(Dataset):
-    def __init__(self, path, tokenizer: MIDITokenizer, max_len=2048, aug=True):
+    def __init__(self, path, tokenizer: MIDITokenizer, max_len=2048, aug=True, check_alignment=True):
         all_files = {
             os.path.relpath(os.path.join(root, fname), path)
             for root, _dirs, files in os.walk(path)
@@ -40,6 +40,7 @@ class MidiDataset(Dataset):
         self.midi_list = all_midis
         self.max_len = max_len
         self.aug = aug
+        self.check_alignment = check_alignment
 
     def __len__(self):
         return len(self.midi_list)
@@ -49,11 +50,14 @@ class MidiDataset(Dataset):
         path = os.path.join(self.path, fname)
         try:
             with open(path, 'rb') as f:
-                mid = self.tokenizer.tokenize(MIDI.midi2score(f.read()))
-                if self.aug:
-                    mid = self.tokenizer.augment(mid)
+                mid = MIDI.midi2score(f.read())
             if max([0] + [len(track) for track in mid[1:]]) == 0:
-                raise ValueError
+                raise ValueError("empty track")
+            mid = self.tokenizer.tokenize(mid)
+            if not self.tokenizer.check_alignment(mid):
+                raise ValueError("not aligned")
+            if self.aug:
+                mid = self.tokenizer.augment(mid)
         except Exception:
             mid = self.load_midi(random.randint(0, self.__len__() - 1))
         return mid

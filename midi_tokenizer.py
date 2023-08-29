@@ -205,3 +205,16 @@ class MIDITokenizer:
                     tokens_new[4] = self.parameter_ids["bpm"][bpm]
             midi_seq_new.append(tokens_new)
         return midi_seq_new
+
+    def check_alignment(self, midi_seq, threshold=0.25):
+        total = 0
+        aligned = 0
+        for tokens in midi_seq:
+            if tokens[0] in self.id_events:
+                t2 = tokens[2] - self.parameter_ids["time2"][0]
+                total += 1
+                if t2 % 8 == 0:
+                    aligned += 1
+        if total == 0:
+            return False
+        return aligned / total > threshold
