@@ -26,7 +26,7 @@ def file_ext(fname):
 
 
 class MidiDataset(Dataset):
-    def __init__(self, path, tokenizer: MIDITokenizer, max_len=2048):
+    def __init__(self, path, tokenizer: MIDITokenizer, max_len=2048, aug=True):
         all_files = {
             os.path.relpath(os.path.join(root, fname), path)
             for root, _dirs, files in os.walk(path)
@@ -39,6 +39,7 @@ class MidiDataset(Dataset):
         self.tokenizer = tokenizer
         self.midi_list = all_midis
         self.max_len = max_len
+        self.aug = aug
 
     def __len__(self):
         return len(self.midi_list)
@@ -49,6 +50,8 @@ class MidiDataset(Dataset):
         try:
             with open(path, 'rb') as f:
                 mid = self.tokenizer.tokenize(MIDI.midi2score(f.read()))
+                if self.aug:
+                    mid = self.tokenizer.augment(mid)
             if max([0] + [len(track) for track in mid[1:]]) == 0:
                 raise ValueError
         except Exception:
@@ -125,14 +128,14 @@ class TrainMIDIModel(MIDIModel):
         }
 
     def training_step(self, batch, batch_idx):
-        x = batch[:, :-1].contiguous()  # (batch_size, time_sequence_length, note_sequence_length)
+        x = batch[:, :-1].contiguous()  # (batch_size, midi_sequence_length, token_sequence_length)
         y = batch[:, 1:].contiguous()
         hidden = self.forward(x)
         # rand_idx = [-1] + random.sample(list(range(y.shape[1] - 2)), 127)
         # hidden = hidden[:, rand_idx]
         hidden = hidden.reshape(-1, hidden.shape[-1])
         # y = y[:, rand_idx]
-        y = y.reshape(-1, y.shape[-1])  # (batch_size*time_sequence_length, note_sequence_length)
+        y = y.reshape(-1, y.shape[-1])  # (batch_size*midi_sequence_length, token_sequence_length)
         x = y[:, :-1]
         logits = self.forward_token(hidden, x)
         loss = F.cross_entropy(
@@ -146,11 +149,11 @@ class TrainMIDIModel(MIDIModel):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        x = batch[:, :-1].contiguous()  # (batch_size, time_sequence_length, note_sequence_length)
+        x = batch[:, :-1].contiguous()  # (batch_size, midi_sequence_length, token_sequence_length)
         y = batch[:, 1:].contiguous()
         hidden = self.forward(x)
         hidden = hidden.reshape(-1, hidden.shape[-1])
-        y = y.reshape(-1, y.shape[-1])  # (batch_size*time_sequence_length, note_sequence_length)
+        y = y.reshape(-1, y.shape[-1])  # (batch_size*midi_sequence_length, token_sequence_length)
         x = y[:, :-1]
         logits = self.forward_token(hidden, x)
         loss = F.cross_entropy(
@@ -264,7 +267,7 @@ if __name__ == '__main__':
         "--disable-benchmark", action="store_true", default=False, help="disable cudnn benchmark"
     )
     parser.add_argument(
-        "--log-step", type=int, default=2, help="log training loss every n steps"
+        "--log-step", type=int, default=1, help="log training loss every n steps"
     )
     parser.add_argument(
         "--val-step", type=int, default=1600, help="valid and save every n steps"

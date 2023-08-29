@@ -1,3 +1,5 @@
+import random
+
 import PIL
 import numpy as np
 
@@ -43,19 +45,31 @@ class MIDITokenizer:
     def tokenize(self, midi_score, add_bos_eos=True):
         ticks_per_beat = midi_score[0]
         event_list = {}
-        track_num = len(midi_score[1:])
         for track_idx, track in enumerate(midi_score[1:129]):
+            last_notes = {}
             for event in track:
-                t = round(16 * event[1] / ticks_per_beat)
+                t = round(16 * event[1] / ticks_per_beat)  # quantization
                 new_event = [event[0], t // 16, t % 16, track_idx] + event[2:]
                 if event[0] == "note":
                     new_event[4] = max(1, round(16 * new_event[4] / ticks_per_beat))
                 elif event[0] == "set_tempo":
                     new_event[4] = int(self.tempo2bpm(new_event[4]))
-                key = hash(tuple(new_event[:-1]))
+                if event[0] == "note":
+                    key = tuple(new_event[:4] + new_event[5:-1])
+                else:
+                    key = tuple(new_event[:-1])
+                if event[0] == "note":  # to eliminate note overlap due to quantization
+                    cp = tuple(new_event[5:7])
+                    if cp in last_notes:
+                        last_note_key, last_note = last_notes[cp]
+                        last_t = last_note[1] * 16 + last_note[2]
+                        last_note[4] = max(0, min(last_note[4], t - last_t))
+                        if last_note[4] == 0:
+                            event_list.pop(last_note_key)
+                    last_notes[cp] = (key, new_event)
                 event_list[key] = new_event
         event_list = list(event_list.values())
-        event_list = sorted(event_list, key=lambda e: (e[1] * 16 + e[2]) * track_num + e[3])
+        event_list = sorted(event_list, key=lambda e: e[1:4])
         midi_seq = []
 
         last_t1 = 0
@@ -113,18 +127,24 @@ class MIDITokenizer:
                     tracks_dict[track_idx] = []
                 tracks_dict[track_idx].append([event[0], t] + event[4:])
         tracks = list(tracks_dict.values())
-        for i in range(len(tracks)):
+
+        for i in range(len(tracks)):  # to eliminate note overlap
             track = tracks[i]
             track = sorted(track, key=lambda e: e[1])
             last_note_t = {}
+            zero_len_notes = []
             for e in reversed(track):
                 if e[0] == "note":
                     t, d, c, p = e[1:5]
                     key = (c, p)
                     if key in last_note_t:
-                        d = min(d, max(last_note_t[key] - t, 0))  # to avoid note overlap
+                        d = min(d, max(last_note_t[key] - t, 0))
                     last_note_t[key] = t
                     e[2] = d
+                    if d == 0:
+                        zero_len_notes.append(e)
+            for e in zero_len_notes:
+                track.remove(e)
             tracks[i] = track
         return [ticks_per_beat, *tracks]
 
@@ -148,3 +168,40 @@ class MIDITokenizer:
             img[p, t: t + d] = colors[(tr, c)]
         img = PIL.Image.fromarray(np.flip(img, 0))
         return img
+
+    def augment(self, midi_seq, max_pitch_shift=4, max_vel_shift=10, max_cc_val_shift=10, max_bpm_shift=10):
+        pitch_shift = random.randint(-max_pitch_shift, max_pitch_shift)
+        vel_shift = random.randint(-max_vel_shift, max_vel_shift)
+        cc_val_shift = random.randint(-max_cc_val_shift, max_cc_val_shift)
+        bpm_shift = random.randint(-max_bpm_shift, max_bpm_shift)
+        midi_seq_new = []
+        for tokens in midi_seq:
+            tokens_new = [*tokens]
+            if tokens[0] in self.id_events:
+                name = self.id_events[tokens[0]]
+                if name == "note":
+                    c = tokens[5] - self.parameter_ids["channel"][0]
+                    p = tokens[6] - self.parameter_ids["pitch"][0]
+                    v = tokens[7] - self.parameter_ids["velocity"][0]
+                    if c != 9:  # no shift for drums
+                        p += pitch_shift
+                    if not 0 <= p < 128:
+                        return midi_seq
+                    v += vel_shift
+                    v = max(1, min(127, v))
+                    tokens_new[6] = self.parameter_ids["pitch"][p]
+                    tokens_new[7] = self.parameter_ids["velocity"][v]
+                elif name == "control_change":
+                    cc = tokens[5] - self.parameter_ids["controller"][0]
+                    val = tokens[6] - self.parameter_ids["value"][0]
+                    if cc in [1, 2, 7, 11]:
+                        val += cc_val_shift
+                        val = max(1, min(127, val))
+                    tokens_new[6] = self.parameter_ids["value"][val]
+                elif name == "set_tempo":
+                    bpm = tokens[4] - self.parameter_ids["bpm"][0]
+                    bpm += bpm_shift
+                    bpm = max(1, min(255, bpm))
+                    tokens_new[4] = self.parameter_ids["bpm"][bpm]
+            midi_seq_new.append(tokens_new)
+        return midi_seq_new

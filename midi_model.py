@@ -43,8 +43,8 @@ class MIDIModel(pl.LightningModule):
 
     def forward(self, x):
         """
-        :param x: (batch_size, time_sequence_length, token_sequence_length)
-        :return: hidden (batch_size, time_sequence_length, n_embd)
+        :param x: (batch_size, midi_sequence_length, token_sequence_length)
+        :return: hidden (batch_size, midi_sequence_length, n_embd)
         """
 
         # merge token sequence
