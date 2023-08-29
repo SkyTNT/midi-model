@@ -206,7 +206,7 @@ class MIDITokenizer:
             midi_seq_new.append(tokens_new)
         return midi_seq_new
 
-    def check_alignment(self, midi_seq, threshold=0.4):
+    def check_alignment(self, midi_seq, threshold=0.3):
         total = 0
         hist = [0] * 16
         for tokens in midi_seq:
