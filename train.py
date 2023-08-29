@@ -172,7 +172,7 @@ class TrainMIDIModel(MIDIModel):
             img.save(f"sample/{self.global_step}_0.png")
             with open(f"sample/{self.global_step}_0.mid", 'wb') as f:
                 f.write(MIDI.score2midi(mid))
-            prompt = full_dataset.load_midi(random.randint(0, len(full_dataset) - 1))
+            prompt = val_dataset.load_midi(random.randint(0, len(val_dataset) - 1))
             prompt = np.asarray(prompt, dtype=np.int16)
             start_idx = random.randrange(0, max(1, prompt.shape[0] - 256))
             ori = prompt[start_idx: start_idx + 512]
@@ -188,8 +188,8 @@ class TrainMIDIModel(MIDIModel):
 
         try:
             gen_example()
-        except Exception:
-            pass
+        except Exception as e:
+            print(e)
         torch.cuda.empty_cache()
 
 
