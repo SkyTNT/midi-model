@@ -14,7 +14,7 @@ def synthesis(midi_opus, soundfont_path, sample_rate=44100):
             event_list.append(event_new)
     event_list = sorted(event_list, key=lambda e: e[1])
 
-    tempo = int((60 / 140) * 10 ** 6)  # default 140 bpm
+    tempo = int((60 / 120) * 10 ** 6)  # default 120 bpm
     ss = np.empty((0, 2), dtype=np.int16)
     fl = fluidsynth.Synth(samplerate=float(sample_rate))
     sfid = fl.sfload(soundfont_path)
