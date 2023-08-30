@@ -238,6 +238,7 @@ if __name__ == '__main__':
     parser.add_argument("--weight-decay", type=float, default=0.01, help="weight decay")
     parser.add_argument("--warmup-step", type=int, default=1e3, help="warmup step")
     parser.add_argument("--max-step", type=int, default=1e6, help="max training step")
+    parser.add_argument("--grad-clip", type=float, default=1.0, help="gradient clip val")
     parser.add_argument(
         "--batch-size-train", type=int, default=2, help="batch size for training"
     )
@@ -335,6 +336,7 @@ if __name__ == '__main__':
     trainer = Trainer(
         precision=32 if opt.fp32 else 16,
         accumulate_grad_batches=opt.acc_grad,
+        gradient_clip_val=opt.grad_clip,
         accelerator="gpu",
         devices=opt.devices,
         max_steps=opt.max_step,
