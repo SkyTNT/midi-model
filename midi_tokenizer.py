@@ -169,16 +169,36 @@ class MIDITokenizer:
         img = PIL.Image.fromarray(np.flip(img, 0))
         return img
 
-    def augment(self, midi_seq, max_pitch_shift=4, max_vel_shift=10, max_cc_val_shift=10, max_bpm_shift=10):
+    def augment(self, midi_seq, max_pitch_shift=4, max_vel_shift=10, max_cc_val_shift=10, max_bpm_shift=10,
+                max_track_shift=128, max_channel_shift=16):
         pitch_shift = random.randint(-max_pitch_shift, max_pitch_shift)
         vel_shift = random.randint(-max_vel_shift, max_vel_shift)
         cc_val_shift = random.randint(-max_cc_val_shift, max_cc_val_shift)
         bpm_shift = random.randint(-max_bpm_shift, max_bpm_shift)
+        track_shift = random.randint(0, max_track_shift)
+        channel_shift = random.randint(0, max_channel_shift)
         midi_seq_new = []
         for tokens in midi_seq:
             tokens_new = [*tokens]
             if tokens[0] in self.id_events:
                 name = self.id_events[tokens[0]]
+                for i, pn in enumerate(self.events[name]):
+                    if pn == "track":
+                        tr = tokens[1 + i] - self.parameter_ids[pn][0]
+                        tr += track_shift
+                        tr = tr % self.event_parameters[pn]
+                        tokens_new[1 + i] = self.parameter_ids[pn][tr]
+                    elif pn == "channel":
+                        c = tokens[1 + i] - self.parameter_ids[pn][0]
+                        c0 = c
+                        c += channel_shift
+                        c = c % self.event_parameters[pn]
+                        if c0 == 9:
+                            c = 9
+                        elif c == 9:
+                            c = (9 + channel_shift) % self.event_parameters[pn]
+                        tokens_new[1 + i] = self.parameter_ids[pn][c]
+
                 if name == "note":
                     c = tokens[5] - self.parameter_ids["channel"][0]
                     p = tokens[6] - self.parameter_ids["pitch"][0]
