@@ -45,9 +45,10 @@ def synthesis(midi_opus, soundfont_path, sample_rate=44100):
     synthesized = np.zeros((max([w.shape[0] for w in waveforms]), 2), dtype=np.int32)
     for waveform in waveforms:
         synthesized[:waveform.shape[0]] += waveform
-    max_val = np.abs(synthesized).max()
-    if max_val != 0:
-        synthesized = (synthesized / max_val) * np.iinfo(np.int16).max
+    if synthesized.shape[0] > 0:
+        max_val = np.abs(synthesized).max()
+        if max_val != 0:
+            synthesized = (synthesized / max_val) * np.iinfo(np.int16).max
     synthesized = synthesized.astype(np.int16)
 
     return synthesized
