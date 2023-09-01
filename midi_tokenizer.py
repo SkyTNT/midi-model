@@ -170,7 +170,7 @@ class MIDITokenizer:
         return img
 
     def augment(self, midi_seq, max_pitch_shift=4, max_vel_shift=10, max_cc_val_shift=10, max_bpm_shift=10,
-                max_track_shift=128, max_channel_shift=16):
+                max_track_shift=1, max_channel_shift=16):
         pitch_shift = random.randint(-max_pitch_shift, max_pitch_shift)
         vel_shift = random.randint(-max_vel_shift, max_vel_shift)
         cc_val_shift = random.randint(-max_cc_val_shift, max_cc_val_shift)

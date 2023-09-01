@@ -56,15 +56,22 @@ class MidiDataset(Dataset):
     def __getitem__(self, index):
         mid = self.load_midi(index)
         mid = np.asarray(mid, dtype=np.int16)
-        if mid.shape[0] < self.max_len:
-            mid = np.pad(mid, ((0, self.max_len - mid.shape[0]), (0, 0)),
-                         mode="constant", constant_values=self.tokenizer.pad_id)
+        # if mid.shape[0] < self.max_len:
+        #     mid = np.pad(mid, ((0, self.max_len - mid.shape[0]), (0, 0)),
+        #                  mode="constant", constant_values=self.tokenizer.pad_id)
         start_idx = random.randrange(0, max(1, mid.shape[0] - self.max_len))
         start_idx = random.choice([0, start_idx])
         mid = mid[start_idx: start_idx + self.max_len]
         mid = mid.astype(np.int64)
         mid = torch.from_numpy(mid)
         return mid
+
+
+def collate_fn(batch):
+    max_len = max([len(mid) for mid in batch])
+    batch = [F.pad(mid, (0, 0, 0, max_len - mid.shape[0]), mode="constant", value=tokenizer.pad_id) for mid in batch]
+    batch = torch.stack(batch)
+    return batch
 
 
 def get_linear_schedule_with_warmup(optimizer, num_warmup_steps, num_training_steps, last_epoch=-1):
@@ -126,10 +133,10 @@ class TrainMIDIModel(MIDIModel):
         x = batch[:, :-1].contiguous()  # (batch_size, midi_sequence_length, token_sequence_length)
         y = batch[:, 1:].contiguous()
         hidden = self.forward(x)
-        # rand_idx = [-1] + random.sample(list(range(y.shape[1] - 2)), 127)
-        # hidden = hidden[:, rand_idx]
+        rand_idx = [-1] + random.sample(list(range(y.shape[1] - 2)), min(127, (y.shape[1] - 2) // 2))
+        hidden = hidden[:, rand_idx]
         hidden = hidden.reshape(-1, hidden.shape[-1])
-        # y = y[:, rand_idx]
+        y = y[:, rand_idx]
         y = y.reshape(-1, y.shape[-1])  # (batch_size*midi_sequence_length, token_sequence_length)
         x = y[:, :-1]
         logits = self.forward_token(hidden, x)
@@ -228,13 +235,13 @@ if __name__ == '__main__':
     parser.add_argument(
         "--max-len",
         type=int,
-        default=2048,
+        default=4096,
         help="max seq length for training",
     )
 
     # training args
     parser.add_argument("--seed", type=int, default=0, help="seed")
-    parser.add_argument("--lr", type=float, default=2e-4, help="learning rate")
+    parser.add_argument("--lr", type=float, default=2e-5, help="learning rate")
     parser.add_argument("--weight-decay", type=float, default=0.01, help="weight decay")
     parser.add_argument("--warmup-step", type=int, default=1e3, help="warmup step")
     parser.add_argument("--max-step", type=int, default=1e6, help="max training step")
@@ -258,7 +265,7 @@ if __name__ == '__main__':
         help="workers num for validation dataloader",
     )
     parser.add_argument(
-        "--acc-grad", type=int, default=4, help="gradient accumulation"
+        "--acc-grad", type=int, default=2, help="gradient accumulation"
     )
     parser.add_argument(
         "--accelerator",
@@ -306,6 +313,7 @@ if __name__ == '__main__':
         persistent_workers=True,
         num_workers=opt.workers_train,
         pin_memory=True,
+        collate_fn=collate_fn
     )
     val_dataloader = DataLoader(
         val_dataset,
@@ -314,6 +322,7 @@ if __name__ == '__main__':
         persistent_workers=True,
         num_workers=opt.workers_val,
         pin_memory=True,
+        collate_fn=collate_fn
     )
     print(f"train: {len(train_dataset)}  val: {len(val_dataset)}")
     model = TrainMIDIModel(tokenizer, flash=True, lr=opt.lr, weight_decay=opt.weight_decay,
