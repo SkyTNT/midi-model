@@ -152,7 +152,7 @@ def run(tab, instruments, drum_kit, mid, midi_events, gen_events, temp, top_p, t
         patches = {}
         for instr in instruments:
             patches[i] = patch2number[instr]
-            i = (i + 1) if i != 9 else 10
+            i = (i + 1) if i != 8 else 10
         if drum_kit != "None":
             patches[9] = drum_kits2number[drum_kit]
         for i, (c, p) in enumerate(patches.items()):
