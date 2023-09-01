@@ -216,14 +216,13 @@ if __name__ == "__main__":
                 example1 = gr.Examples([
                     [[], "None"],
                     [["Acoustic Grand"], "None"],
-                    [["Acoustic Grand", "Violin", "Viola", "Cello", "Contrabass", "Timpani"], "Orchestra"],
+                    [["Acoustic Grand", "Violin", "Viola", "Cello", "Contrabass"], "Orchestra"],
+                    [["Flute", "Cello", "Bassoon", "Tuba"], "None"],
+                    [["Violin", "Viola", "Cello", "Contrabass", "Trumpet", "French Horn", "Brass Section",
+                      "Flute", "Piccolo", "Tuba", "Trombone", "Timpani"], "Orchestra"],
                     [["Acoustic Guitar(nylon)", "Acoustic Guitar(steel)", "Electric Guitar(jazz)",
                       "Electric Guitar(clean)", "Electric Guitar(muted)", "Overdriven Guitar", "Distortion Guitar",
-                      "Electric Bass(finger)"], "Standard"],
-                    [["Flute", "Cello", "Bassoon", "Tuba"], "None"],
-                    [["Acoustic Grand", "String Ensemble 1", "Trombone", "Tuba", "Muted Trumpet", "French Horn", "Oboe",
-                      "English Horn", "Bassoon", "Clarinet"], "Orchestra"]
-
+                      "Electric Bass(finger)"], "Standard"]
                 ], [input_instruments, input_drum_kit])
             with gr.TabItem("midi prompt") as tab2:
                 input_midi = gr.File(label="input midi", file_types=[".midi", ".mid"], type="binary")
