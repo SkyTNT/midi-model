@@ -181,9 +181,8 @@ class TrainMIDIModel(MIDIModel):
                 f.write(MIDI.score2midi(mid))
             prompt = val_dataset.load_midi(random.randint(0, len(val_dataset) - 1))
             prompt = np.asarray(prompt, dtype=np.int16)
-            start_idx = random.randrange(0, max(1, prompt.shape[0] - 256))
-            ori = prompt[start_idx: start_idx + 512]
-            prompt = prompt[start_idx: start_idx + 256].astype(np.int64)
+            ori = prompt[:512]
+            prompt = prompt[:256].astype(np.int64)
             mid = self.generate(prompt)
             mid = self.tokenizer.detokenize(mid)
             img = self.tokenizer.midi2img(mid)
