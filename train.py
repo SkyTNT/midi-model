@@ -41,11 +41,16 @@ class MidiDataset(Dataset):
         path = self.midi_list[index]
         try:
             with open(path, 'rb') as f:
-                mid = MIDI.midi2score(f.read())
+                datas = f.read()
+            if len(datas) > 384000:
+                raise ValueError("file too large")
+            elif len(datas) < 3000:
+                raise ValueError("file too small")
+            mid = MIDI.midi2score(datas)
             if max([0] + [len(track) for track in mid[1:]]) == 0:
                 raise ValueError("empty track")
             mid = self.tokenizer.tokenize(mid)
-            if not self.tokenizer.check_alignment(mid):
+            if self.check_alignment and not self.tokenizer.check_alignment(mid):
                 raise ValueError("not aligned")
             if self.aug:
                 mid = self.tokenizer.augment(mid)
