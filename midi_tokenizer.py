@@ -101,6 +101,19 @@ class MIDITokenizer:
         tokens += [self.pad_id] * (self.max_token_seq - len(tokens))
         return tokens
 
+    def tokens2event(self, tokens):
+        if tokens[0] in self.id_events:
+            name = self.id_events[tokens[0]]
+            if len(tokens) <= len(self.events[name]):
+                return []
+            params = tokens[1:]
+            params = [params[i] - self.parameter_ids[p][0] for i, p in enumerate(self.events[name])]
+            if not all([0 <= params[i] < self.event_parameters[p] for i, p in enumerate(self.events[name])]):
+                return []
+            event = [name] + params
+            return event
+        return []
+
     def detokenize(self, midi_seq):
         ticks_per_beat = 480
         tracks_dict = {}
