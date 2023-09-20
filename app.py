@@ -254,7 +254,7 @@ if __name__ == "__main__":
         stop_btn = gr.Button("stop and output")
         output_midi_seq = gr.Variable()
         output_midi_visualizer = gr.HTML(elem_id="midi_visualizer_container")
-        output_audio = gr.Audio(label="output audio", format="wav", elem_id="midi_audio")
+        output_audio = gr.Audio(label="output audio", format="mp3", elem_id="midi_audio")
         output_midi = gr.File(label="output midi", file_types=[".mid"])
         run_event = run_btn.click(run, [tab_select, input_instruments, input_drum_kit, input_midi, input_midi_events,
                                         input_gen_events, input_temp, input_top_p, input_top_k,
