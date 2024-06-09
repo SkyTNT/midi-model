@@ -98,6 +98,8 @@ def run(tab, instruments, drum_kit, mid, midi_events, gen_events, temp, top_p, t
         i = 0
         mid = [[tokenizer.bos_id] + [tokenizer.pad_id] * (tokenizer.max_token_seq - 1)]
         patches = {}
+        if instruments is None:
+            instruments = []
         for instr in instruments:
             patches[i] = patch2number[instr]
             i = (i + 1) if i != 8 else 10
@@ -154,7 +156,7 @@ def load_model(path):
 
 def get_model_path():
     model_paths = sorted(glob.glob("**/*.ckpt", recursive=True))
-    return model_path_input.update(choices=model_paths)
+    return gr.Dropdown(choices=model_paths)
 
 
 def load_javascript(dir="javascript"):
@@ -174,20 +176,17 @@ def load_javascript(dir="javascript"):
 
     gr.routes.templates.TemplateResponse = template_response
 
+# JSMsgReceiver
+HTML_postprocess_ori = gr.HTML.postprocess
 
-class JSMsgReceiver(gr.HTML):
 
-    def __init__(self, **kwargs):
-        super().__init__(elem_id="msg_receiver", visible=False, **kwargs)
+def JSMsgReceiver_postprocess(self, y):
+    if self.elem_id == "msg_receiver" and y:
+        y = f"<p>{json.dumps(y)}</p>"
+    return HTML_postprocess_ori(self, y)
 
-    def postprocess(self, y):
-        if y:
-            y = f"<p>{json.dumps(y)}</p>"
-        return super().postprocess(y)
 
-    def get_block_name(self) -> str:
-        return "html"
-
+gr.HTML.postprocess = JSMsgReceiver_postprocess
 
 number2drum_kits = {-1: "None", 0: "Standard", 8: "Room", 16: "Power", 24: "Electric", 25: "TR-808", 32: "Jazz",
                     40: "Blush", 48: "Orchestra"}
@@ -206,7 +205,7 @@ if __name__ == "__main__":
     load_javascript()
     app = gr.Blocks()
     with app:
-        js_msg = JSMsgReceiver()
+        js_msg = gr.HTML(elem_id="msg_receiver", visible=False)
         with gr.Accordion(label="Model option", open=False):
             load_model_path_btn = gr.Button("Get Models")
             model_path_input = gr.Dropdown(label="model")
@@ -216,7 +215,7 @@ if __name__ == "__main__":
             load_model_btn.click(
                 load_model, model_path_input, model_msg
             )
-        tab_select = gr.Variable(value=0)
+        tab_select = gr.State(value=0)
         with gr.Tabs():
             with gr.TabItem("instrument prompt") as tab1:
                 input_instruments = gr.Dropdown(label="instruments (auto if empty)", choices=list(patch2number.keys()),
@@ -252,7 +251,7 @@ if __name__ == "__main__":
             example3 = gr.Examples([[1, 0.98, 12], [1.2, 0.95, 8]], [input_temp, input_top_p, input_top_k])
         run_btn = gr.Button("generate", variant="primary")
         stop_btn = gr.Button("stop and output")
-        output_midi_seq = gr.Variable()
+        output_midi_seq = gr.State()
         output_midi_visualizer = gr.HTML(elem_id="midi_visualizer_container")
         output_audio = gr.Audio(label="output audio", format="mp3", elem_id="midi_audio")
         output_midi = gr.File(label="output midi", file_types=[".mid"])

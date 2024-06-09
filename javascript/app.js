@@ -1,3 +1,46 @@
+/**
+ * 自动绕过 shadowRoot 的 querySelector
+ * @param {string} selector - 要查询的 CSS 选择器
+ * @returns {Element|null} - 匹配的元素或 null 如果未找到
+ */
+function deepQuerySelector(selector) {
+  /**
+   * 在指定的根元素或文档对象下深度查询元素
+   * @param {Element|Document} root - 要开始搜索的根元素或文档对象
+   * @param {string} selector - 要查询的 CSS 选择器
+   * @returns {Element|null} - 匹配的元素或 null 如果未找到
+   */
+  function deepSearch(root, selector) {
+    // 在当前根元素下查找
+    let element = root.querySelector(selector);
+    if (element) {
+      return element;
+    }
+
+    // 如果未找到，递归检查 shadow DOM
+    const shadowHosts = root.querySelectorAll('*');
+
+    for (let i = 0; i < shadowHosts.length; i++) {
+      const host = shadowHosts[i];
+
+      // 检查当前元素是否有 shadowRoot
+      if (host.shadowRoot) {
+        element = deepSearch(host.shadowRoot, selector);
+        if (element) {
+          return element;
+        }
+      }
+    }
+    // 未找到元素
+    return null;
+  }
+
+  return deepSearch(this, selector);
+}
+
+Element.prototype.deepQuerySelector = deepQuerySelector;
+Document.prototype.deepQuerySelector = deepQuerySelector;
+
 function gradioApp() {
     const elems = document.getElementsByTagName('gradio-app')
     const gradioShadowRoot = elems.length == 0 ? null : elems[0].shadowRoot
@@ -98,6 +141,7 @@ class MidiVisualizer extends HTMLElement{
         this.timePreBeat = 16
         this.svgWidth = 0;
         this.t1 = 0;
+        this.totalTimeMs = 0
         this.playTime = 0
         this.playTimeMs = 0
         this.colorMap = new Map();
@@ -137,6 +181,7 @@ class MidiVisualizer extends HTMLElement{
         this.t1 = 0
         this.colorMap.clear()
         this.setPlayTime(0);
+        this.totalTimeMs = 0;
         this.playTimeMs = 0
         this.svgWidth = 0
         this.svg.innerHTML = ''
@@ -215,6 +260,9 @@ class MidiVisualizer extends HTMLElement{
                 tempo = (60 / midiEvent[3]) * 10 ** 3
                 this.midiTimes.push({ms:ms, t: t, tempo: tempo})
             }
+            if(midiEvent[0]==="note"){
+                this.totalTimeMs = ms + (midiEvent[3]/ this.timePreBeat)*tempo
+            }
             lastT = t
         })
     }
@@ -277,16 +325,10 @@ class MidiVisualizer extends HTMLElement{
 
     play(){
         this.playing = true;
-        this.timer = setInterval(() => {
-            this.setPlayTimeMs(this.playTimeMs + 10)
-        }, 10);
     }
 
     pause(){
-        if(!!this.timer)
-            clearInterval(this.timer)
         this.removeActiveNotes(this.activeNotes)
-        this.timer = null;
         this.playing = false;
     }
 
@@ -299,9 +341,25 @@ class MidiVisualizer extends HTMLElement{
         audio.addEventListener("pause", (event)=>{
             this.pause()
         })
-        audio.addEventListener("timeupdate", (event)=>{
-            this.setPlayTimeMs(event.target.currentTime*10**3)
-        })
+    }
+
+    bindWaveformCursor(cursor){
+        let self = this;
+        const callback = function(mutationsList, observer) {
+            for(let mutation of mutationsList) {
+                if (mutation.type === 'attributes' && mutation.attributeName === 'style') {
+                    let progress = parseFloat(mutation.target.style.left.slice(0,-1))*0.01;
+                    if(!isNaN(progress)){
+                        self.setPlayTimeMs(progress*self.totalTimeMs);
+                    }
+                }
+            }
+        };
+        const observer = new MutationObserver(callback);
+        observer.observe(cursor, {
+            attributes: true,
+            attributeFilter: ['style']
+        });
     }
 }
 
@@ -309,7 +367,8 @@ customElements.define('midi-visualizer', MidiVisualizer);
 
 (()=>{
     let midi_visualizer_container_inited = null
-    let midi_audio_inited = null;
+    let midi_audio_audio_inited = null;
+    let midi_audio_cursor_inited = null;
     let midi_visualizer = document.createElement('midi-visualizer')
     onUiUpdate((m)=>{
         let app = gradioApp()
@@ -318,10 +377,18 @@ customElements.define('midi-visualizer', MidiVisualizer);
             midi_visualizer_container.appendChild(midi_visualizer)
             midi_visualizer_container_inited = midi_visualizer_container;
         }
-        let midi_audio = app.querySelector("#midi_audio > audio");
-        if(!!midi_audio && midi_audio_inited!==midi_audio){
-            midi_visualizer.bindAudioPlayer(midi_audio)
-            midi_audio_inited = midi_audio
+        let midi_audio = app.querySelector("#midi_audio");
+        if (!!midi_audio){
+            let midi_audio_cursor = midi_audio.deepQuerySelector(".cursor");
+            if(!!midi_audio_cursor && midi_audio_cursor_inited!==midi_audio_cursor){
+                midi_visualizer.bindWaveformCursor(midi_audio_cursor)
+                midi_audio_cursor_inited = midi_audio_cursor
+            }
+            let midi_audio_audio = midi_audio.deepQuerySelector("audio");
+            if(!!midi_audio_audio && midi_audio_audio_inited!==midi_audio_audio){
+                midi_visualizer.bindAudioPlayer(midi_audio_audio)
+                midi_audio_audio_inited = midi_audio_audio
+            }
         }
     })
 
