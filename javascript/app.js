@@ -76,33 +76,6 @@ document.addEventListener("DOMContentLoaded", function() {
     mutationObserver.observe( gradioApp(), { childList:true, subtree:true })
 });
 
-(()=>{
-    let mse_receiver_inited = null
-    onUiUpdate(()=>{
-        let app = gradioApp()
-        let msg_receiver = app.querySelector("#msg_receiver");
-        if(!!msg_receiver && mse_receiver_inited !== msg_receiver){
-            let mutationObserver = new MutationObserver(function(ms){
-                ms.forEach((m)=>{
-                    m.addedNodes.forEach((node)=>{
-                        if(node.nodeName === "P"){
-                            let obj = JSON.parse(node.innerText);
-                            if(obj instanceof Array){
-                                obj.forEach((o)=>{executeCallbacks(msgReceiveCallbacks, o);});
-                            }else{
-                                executeCallbacks(msgReceiveCallbacks, obj);
-                            }
-                        }
-                    })
-                })
-            });
-            mutationObserver.observe( msg_receiver, {childList:true, subtree:true, characterData:true})
-            console.log("receiver init");
-            mse_receiver_inited = msg_receiver;
-        }
-    })
-})()
-
 function HSVtoRGB(h, s, v) {
     let r, g, b, i, f, p, q, t;
     i = Math.floor(h * 6);
@@ -261,9 +234,11 @@ class MidiVisualizer extends HTMLElement{
                 this.midiTimes.push({ms:ms, t: t, tempo: tempo})
             }
             if(midiEvent[0]==="note"){
-                this.totalTimeMs = ms + (midiEvent[3]/ this.timePreBeat)*tempo
+                this.totalTimeMs = Math.max(this.totalTimeMs, ms + (midiEvent[3]/ this.timePreBeat)*tempo)
+            }else{
+                this.totalTimeMs = Math.max(this.totalTimeMs, ms);
             }
-            lastT = t
+            lastT = t;
         })
     }
 
@@ -340,6 +315,10 @@ class MidiVisualizer extends HTMLElement{
         })
         audio.addEventListener("pause", (event)=>{
             this.pause()
+        })
+        audio.addEventListener("loadedmetadata", (event)=>{
+            //I don't know why the calculated totalTimeMs is different from audio.duration*10**3
+            this.totalTimeMs = audio.duration*10**3;
         })
     }
 
@@ -431,7 +410,22 @@ customElements.define('midi-visualizer', MidiVisualizer);
         divInner.textContent = `${progress}/${total}`;
     }
 
-    onMsgReceive((msg)=>{
+    onMsgReceive((msgs)=>{
+        for(let msg of msgs){
+            if(msg instanceof Array){
+                msg.forEach((o)=>{handleMsg(o)});
+            }else{
+                handleMsg(msg);
+            }
+        }
+    })
+    let handled_msgs = [];
+    function handleMsg(msg){
+        if(handled_msgs.indexOf(msg.uuid)!== -1)
+            return;
+        handled_msgs.push(msg.uuid);
+        if(handled_msgs.length > 200)
+            handled_msgs = handled_msgs.slice(1);
         switch (msg.name) {
             case "visualizer_clear":
                 midi_visualizer.clearMidiEvents();
@@ -452,5 +446,5 @@ customElements.define('midi-visualizer', MidiVisualizer);
                 break;
             default:
         }
-    })
+    }
 })();

@@ -1,6 +1,7 @@
 import argparse
 import glob
 import json
+import uuid
 
 import gradio as gr
 import numpy as np
@@ -84,10 +85,18 @@ def generate(prompt=None, max_len=512, temp=1.0, top_p=0.98, top_k=20,
 
 
 def create_msg(name, data):
-    return {"name": name, "data": data}
+    return {"name": name, "data": data, "uuid": uuid.uuid4().hex}
+
+
+def send_msgs(msgs, msgs_history):
+    msgs_history.append(msgs)
+    if len(msgs_history) > 50:
+        msgs_history.pop(0)
+    return json.dumps(msgs_history)
 
 
 def run(tab, instruments, drum_kit, mid, midi_events, gen_events, temp, top_p, top_k, allow_cc, amp):
+    msgs_history = []
     mid_seq = []
     gen_events = int(gen_events)
     max_len = gen_events
@@ -123,27 +132,29 @@ def run(tab, instruments, drum_kit, mid, midi_events, gen_events, temp, top_p, t
     init_msgs = [create_msg("visualizer_clear", None)]
     for tokens in mid_seq:
         init_msgs.append(create_msg("visualizer_append", tokenizer.tokens2event(tokens)))
-    yield mid_seq, None, None, init_msgs
+    yield mid_seq, None, None, send_msgs(init_msgs, msgs_history), msgs_history
     generator = generate(mid, max_len=max_len, temp=temp, top_p=top_p, top_k=top_k,
                          disable_patch_change=disable_patch_change, disable_control_change=not allow_cc,
                          disable_channels=disable_channels, amp=amp)
     for i, token_seq in enumerate(generator):
         mid_seq.append(token_seq)
         event = tokenizer.tokens2event(token_seq.tolist())
-        yield mid_seq, None, None, [create_msg("visualizer_append", event), create_msg("progress", [i + 1, gen_events])]
+        yield mid_seq, None, None, send_msgs([create_msg("visualizer_append", event), create_msg("progress", [i + 1, gen_events])], msgs_history), msgs_history
     mid = tokenizer.detokenize(mid_seq)
     with open(f"output.mid", 'wb') as f:
         f.write(MIDI.score2midi(mid))
     audio = synthesis(MIDI.score2opus(mid), soundfont_path)
-    yield mid_seq, "output.mid", (44100, audio), [create_msg("visualizer_end", None)]
+    yield mid_seq, "output.mid", (44100, audio), send_msgs([create_msg("visualizer_end", None)], msgs_history), msgs_history
 
 
-def cancel_run(mid_seq):
+def cancel_run(mid_seq, msgs_history):
+    if mid_seq is None:
+        return None, None, []
     mid = tokenizer.detokenize(mid_seq)
     with open(f"output.mid", 'wb') as f:
         f.write(MIDI.score2midi(mid))
     audio = synthesis(MIDI.score2opus(mid), soundfont_path)
-    return "output.mid", (44100, audio), [create_msg("visualizer_end", None)]
+    return "output.mid", (44100, audio), send_msgs([create_msg("visualizer_end", None)], msgs_history)
 
 
 def load_model(path):
@@ -176,17 +187,6 @@ def load_javascript(dir="javascript"):
 
     gr.routes.templates.TemplateResponse = template_response
 
-# JSMsgReceiver
-HTML_postprocess_ori = gr.HTML.postprocess
-
-
-def JSMsgReceiver_postprocess(self, y):
-    if self.elem_id == "msg_receiver" and y:
-        y = f"<p>{json.dumps(y)}</p>"
-    return HTML_postprocess_ori(self, y)
-
-
-gr.HTML.postprocess = JSMsgReceiver_postprocess
 
 number2drum_kits = {-1: "None", 0: "Standard", 8: "Room", 16: "Power", 24: "Electric", 25: "TR-808", 32: "Jazz",
                     40: "Blush", 48: "Orchestra"}
@@ -205,7 +205,15 @@ if __name__ == "__main__":
     load_javascript()
     app = gr.Blocks()
     with app:
-        js_msg = gr.HTML(elem_id="msg_receiver", visible=False)
+        js_msg_history_state = gr.State(value=[])
+        js_msg = gr.Textbox(elem_id="msg_receiver", visible=False)
+        js_msg.change(None, [js_msg], [], js="""
+                (msg_json) =>{
+                    let msgs = JSON.parse(msg_json);
+                    executeCallbacks(msgReceiveCallbacks, msgs);
+                    return [];
+                }
+                """)
         with gr.Accordion(label="Model option", open=False):
             load_model_path_btn = gr.Button("Get Models")
             model_path_input = gr.Dropdown(label="model")
@@ -258,6 +266,8 @@ if __name__ == "__main__":
         run_event = run_btn.click(run, [tab_select, input_instruments, input_drum_kit, input_midi, input_midi_events,
                                         input_gen_events, input_temp, input_top_p, input_top_k,
                                         input_allow_cc, input_amp],
-                                  [output_midi_seq, output_midi, output_audio, js_msg])
-        stop_btn.click(cancel_run, output_midi_seq, [output_midi, output_audio, js_msg], cancels=run_event, queue=False)
-    app.queue(1).launch(server_port=opt.port)
+                                  [output_midi_seq, output_midi, output_audio, js_msg, js_msg_history_state],
+                                  concurrency_limit=3)
+        stop_btn.click(cancel_run, [output_midi_seq, js_msg_history_state], [output_midi, output_audio, js_msg],
+                       cancels=run_event, queue=False)
+    app.launch(server_port=opt.port)
