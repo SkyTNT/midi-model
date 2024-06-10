@@ -424,8 +424,6 @@ customElements.define('midi-visualizer', MidiVisualizer);
         if(handled_msgs.indexOf(msg.uuid)!== -1)
             return;
         handled_msgs.push(msg.uuid);
-        if(handled_msgs.length > 200)
-            handled_msgs = handled_msgs.slice(1);
         switch (msg.name) {
             case "visualizer_clear":
                 midi_visualizer.clearMidiEvents();
@@ -443,6 +441,7 @@ customElements.define('midi-visualizer', MidiVisualizer);
                 midi_visualizer.finishAppendMidiEvent()
                 midi_visualizer.setPlayTime(0);
                 removeProgressBar(midi_visualizer_container_inited);
+                handled_msgs = []
                 break;
             default:
         }
