@@ -245,6 +245,9 @@ if __name__ == '__main__':
         default=2048,
         help="max seq length for training",
     )
+    parser.add_argument(
+        "--quality", action="store_true", default=False, help="check dataset quality"
+    )
 
     # training args
     parser.add_argument("--seed", type=int, default=0, help="seed")
@@ -311,8 +314,8 @@ if __name__ == '__main__':
     train_dataset_len = full_dataset_len - opt.data_val_split
     train_midi_list = midi_list[:train_dataset_len]
     val_midi_list = midi_list[train_dataset_len:]
-    train_dataset = MidiDataset(train_midi_list, tokenizer, max_len=opt.max_len)
-    val_dataset = MidiDataset(val_midi_list, tokenizer, max_len=opt.max_len, aug=False)
+    train_dataset = MidiDataset(train_midi_list, tokenizer, max_len=opt.max_len, aug=True, check_quality=opt.quality)
+    val_dataset = MidiDataset(val_midi_list, tokenizer, max_len=opt.max_len, aug=False, check_quality=opt.quality)
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=opt.batch_size_train,
