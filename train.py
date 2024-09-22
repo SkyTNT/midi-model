@@ -27,7 +27,7 @@ def file_ext(fname):
 
 class MidiDataset(Dataset):
     def __init__(self, midi_list, tokenizer: MIDITokenizer, max_len=2048, min_file_size=3000, max_file_size=384000,
-                 aug=True, check_alignment=True):
+                 aug=True, check_quality=False):
 
         self.tokenizer = tokenizer
         self.midi_list = midi_list
@@ -35,7 +35,7 @@ class MidiDataset(Dataset):
         self.min_file_size = min_file_size
         self.max_file_size = max_file_size
         self.aug = aug
-        self.check_alignment = check_alignment
+        self.check_quality = check_quality
 
     def __len__(self):
         return len(self.midi_list)
@@ -53,8 +53,8 @@ class MidiDataset(Dataset):
             if max([0] + [len(track) for track in mid[1:]]) == 0:
                 raise ValueError("empty track")
             mid = self.tokenizer.tokenize(mid)
-            if self.check_alignment and not self.tokenizer.check_alignment(mid):
-                raise ValueError("not aligned")
+            if self.check_quality and not self.tokenizer.check_quality(mid)[0]:
+                raise ValueError("bad quality")
             if self.aug:
                 mid = self.tokenizer.augment(mid)
         except Exception:
@@ -242,19 +242,19 @@ if __name__ == '__main__':
     parser.add_argument(
         "--max-len",
         type=int,
-        default=4096,
+        default=2048,
         help="max seq length for training",
     )
 
     # training args
     parser.add_argument("--seed", type=int, default=0, help="seed")
-    parser.add_argument("--lr", type=float, default=2e-5, help="learning rate")
+    parser.add_argument("--lr", type=float, default=1e-4, help="learning rate")
     parser.add_argument("--weight-decay", type=float, default=0.01, help="weight decay")
-    parser.add_argument("--warmup-step", type=int, default=1e3, help="warmup step")
+    parser.add_argument("--warmup-step", type=int, default=1e2, help="warmup step")
     parser.add_argument("--max-step", type=int, default=1e6, help="max training step")
     parser.add_argument("--grad-clip", type=float, default=1.0, help="gradient clip val")
     parser.add_argument(
-        "--batch-size-train", type=int, default=2, help="batch size for training"
+        "--batch-size-train", type=int, default=8, help="batch size for training"
     )
     parser.add_argument(
         "--batch-size-val", type=int, default=2, help="batch size for val"

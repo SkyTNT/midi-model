@@ -23,8 +23,8 @@ class MIDIModel(pl.LightningModule):
                                                 num_hidden_layers=n_layer // 4, intermediate_size=n_inner // 4,
                                                 pad_token_id=tokenizer.pad_id, max_position_embeddings=4096))
         if flash:
-            self.net = self.net.to_bettertransformer()
-            self.net_token = self.net_token.to_bettertransformer()
+            torch.backends.cuda.enable_mem_efficient_sdp(True)
+            torch.backends.cuda.enable_flash_sdp(True)
         self.lm_head = nn.Linear(n_embd, tokenizer.vocab_size, bias=False)
 
     def forward_token(self, hidden_state, x=None):

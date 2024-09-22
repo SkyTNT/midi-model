@@ -42,22 +42,47 @@ class MIDITokenizer:
         tempo = int((60 / bpm) * 10 ** 6)
         return tempo
 
-    def tokenize(self, midi_score, add_bos_eos=True):
+    def tokenize(self, midi_score, add_bos_eos=True, cc_eps=4, tempo_eps=4):
         ticks_per_beat = midi_score[0]
         event_list = {}
         for track_idx, track in enumerate(midi_score[1:129]):
             last_notes = {}
+            patch_dict = {}
+            control_dict = {}
+            last_tempo = 0
             for event in track:
+                if event[0] not in self.events:
+                    continue
                 t = round(16 * event[1] / ticks_per_beat)  # quantization
                 new_event = [event[0], t // 16, t % 16, track_idx] + event[2:]
                 if event[0] == "note":
                     new_event[4] = max(1, round(16 * new_event[4] / ticks_per_beat))
                 elif event[0] == "set_tempo":
+                    if new_event[4] == 0: # invalid tempo
+                        continue
                     new_event[4] = int(self.tempo2bpm(new_event[4]))
                 if event[0] == "note":
                     key = tuple(new_event[:4] + new_event[5:-1])
                 else:
                     key = tuple(new_event[:-1])
+                if event[0] == "patch_change":
+                    c, p = event[2:]
+                    last_p = patch_dict.setdefault(c, None)
+                    if last_p == p:
+                        continue
+                    patch_dict[c] = p
+                elif event[0] == "control_change":
+                    c, cc, v = event[2:]
+                    last_v = control_dict.setdefault((c, cc), 0)
+                    if abs(last_v - v) < cc_eps:
+                        continue
+                    control_dict[(c, cc)] = v
+                elif event[0] == "set_tempo":
+                    tempo = new_event[-1]
+                    if abs(last_tempo - tempo) < tempo_eps:
+                        continue
+                    last_tempo = tempo
+
                 if event[0] == "note":  # to eliminate note overlap due to quantization
                     cp = tuple(new_event[5:7])
                     if cp in last_notes:
@@ -71,21 +96,39 @@ class MIDITokenizer:
         event_list = list(event_list.values())
         event_list = sorted(event_list, key=lambda e: e[1:4])
         midi_seq = []
+        setup_events = {}
+        notes_in_setup = False
+        for i, event in enumerate(event_list):  # optimise setup
+            new_event = [*event]
+            if event[0] != "note":
+                new_event[1] = 0
+                new_event[2] = 0
+            has_next = False
+            has_pre = False
+            if i < len(event_list) - 1:
+                next_event = event_list[i + 1]
+                has_next = event[1] + event[2] == next_event[1] + next_event[2]
+            if notes_in_setup and i > 0:
+                pre_event = event_list[i - 1]
+                has_pre = event[1] + event[2] == pre_event[1] + pre_event[2]
+            if (event[0] == "note" and not has_next) or (notes_in_setup and not has_pre) :
+                event_list = sorted(setup_events.values(), key=lambda e: 1 if e[0] == "note" else 0) + event_list[i:]
+                break
+            else:
+                if event[0] == "note":
+                    notes_in_setup = True
+                key = tuple(event[3:-1])
+            setup_events[key] = new_event
 
         last_t1 = 0
         for event in event_list:
-            name = event[0]
-            if name in self.event_ids:
-                params = event[1:]
-                cur_t1 = params[0]
-                params[0] = params[0] - last_t1
-                if not all([0 <= params[i] < self.event_parameters[p] for i, p in enumerate(self.events[name])]):
-                    continue
-                tokens = [self.event_ids[name]] + [self.parameter_ids[p][params[i]]
-                                                   for i, p in enumerate(self.events[name])]
-                tokens += [self.pad_id] * (self.max_token_seq - len(tokens))
-                midi_seq.append(tokens)
-                last_t1 = cur_t1
+            cur_t1 = event[1]
+            event[1] = event[1] - last_t1
+            tokens = self.event2tokens(event)
+            if not tokens:
+                continue
+            midi_seq.append(tokens)
+            last_t1 = cur_t1
 
         if add_bos_eos:
             bos = [self.bos_id] + [self.pad_id] * (self.max_token_seq - 1)
@@ -96,6 +139,8 @@ class MIDITokenizer:
     def event2tokens(self, event):
         name = event[0]
         params = event[1:]
+        if not all([0 <= params[i] < self.event_parameters[p] for i, p in enumerate(self.events[name])]):
+            return []
         tokens = [self.event_ids[name]] + [self.parameter_ids[p][params[i]]
                                            for i, p in enumerate(self.events[name])]
         tokens += [self.pad_id] * (self.max_token_seq - len(tokens))
@@ -120,14 +165,10 @@ class MIDITokenizer:
         t1 = 0
         for tokens in midi_seq:
             if tokens[0] in self.id_events:
-                name = self.id_events[tokens[0]]
-                if len(tokens) <= len(self.events[name]):
+                event = self.tokens2event(tokens)
+                if not event:
                     continue
-                params = tokens[1:]
-                params = [params[i] - self.parameter_ids[p][0] for i, p in enumerate(self.events[name])]
-                if not all([0 <= params[i] < self.event_parameters[p] for i, p in enumerate(self.events[name])]):
-                    continue
-                event = [name] + params
+                name = event[0]
                 if name == "set_tempo":
                     event[4] = self.bpm2tempo(event[4])
                 if event[0] == "note":
@@ -183,7 +224,7 @@ class MIDITokenizer:
         return img
 
     def augment(self, midi_seq, max_pitch_shift=4, max_vel_shift=10, max_cc_val_shift=10, max_bpm_shift=10,
-                max_track_shift=1, max_channel_shift=16):
+                max_track_shift=0, max_channel_shift=16):
         pitch_shift = random.randint(-max_pitch_shift, max_pitch_shift)
         vel_shift = random.randint(-max_vel_shift, max_vel_shift)
         cc_val_shift = random.randint(-max_cc_val_shift, max_cc_val_shift)
@@ -239,16 +280,85 @@ class MIDITokenizer:
             midi_seq_new.append(tokens_new)
         return midi_seq_new
 
-    def check_alignment(self, midi_seq, threshold=0.3):
-        total = 0
-        hist = [0] * 16
-        for tokens in midi_seq:
-            if tokens[0] in self.id_events and self.id_events[tokens[0]] == "note":
-                t2 = tokens[2] - self.parameter_ids["time2"][0]
-                total += 1
-                hist[t2] += 1
-        if total == 0:
-            return False
-        hist = sorted(hist, reverse=True)
-        p = sum(hist[:2]) / total
-        return p > threshold
+    def check_quality(self, midi_seq, alignment_min=0.4, tonality_min=0.8, piano_max=0.7, notes_bandwidth_min=3, notes_density_max=30, notes_density_min=2.5, total_notes_max=10000, total_notes_min=500, note_window_size=16):
+        total_notes = 0
+        channels = []
+        time_hist = [0] * 16
+        note_windows = {}
+        notes_sametime = []
+        notes_density_list = []
+        tonality_list = []
+        notes_bandwidth_list = []
+        instruments = {}
+        piano_channels = []
+        undef_instrument = False
+        abs_t1 = 0
+        last_t = 0
+        for tsi, tokens in enumerate(midi_seq):
+            event = self.tokens2event(tokens)
+            if not event:
+                continue
+            t1, t2, tr = event[1:4]
+            abs_t1 += t1
+            t = abs_t1 * 16 + t2
+            c = None
+            if event[0] == "note":
+                d, c, p, v = event[4:]
+                total_notes += 1
+                time_hist[t2] += 1
+                if c != 9:  # ignore drum channel
+                    if c not in instruments:
+                        undef_instrument = True
+                    note_windows.setdefault(abs_t1 // note_window_size, []).append(p)
+                if last_t != t:
+                    notes_sametime = [(et, p_) for et, p_ in notes_sametime if et > last_t]
+                    notes_sametime_p = [p_ for _, p_ in notes_sametime]
+                    if len(notes_sametime) > 0:
+                        notes_bandwidth_list.append(max(notes_sametime_p) - min(notes_sametime_p))
+                notes_sametime.append((t + d - 1, p))
+            elif event[0] == "patch_change":
+                c, p = event[4:]
+                instruments[c] = p
+                if p == 0 and c not in piano_channels:
+                    piano_channels.append(c)
+            if c is not None and c not in channels:
+                channels.append(c)
+            last_t = t
+        reasons = []
+        if total_notes < total_notes_min:
+            reasons.append("total_min")
+        if total_notes > total_notes_max:
+            reasons.append("total_max")
+        if undef_instrument:
+            reasons.append("undef_instr")
+        if len(note_windows) == 0 and total_notes > 0:
+            reasons.append("drum_only")
+        if reasons:
+            return False, reasons
+        time_hist = sorted(time_hist, reverse=True)
+        alignment = sum(time_hist[:2]) / total_notes
+        for notes in note_windows.values():
+            key_hist = [0] * 12
+            for p in notes:
+                key_hist[p % 12] += 1
+            key_hist = sorted(key_hist, reverse=True)
+            tonality_list.append(sum(key_hist[:7]) / len(notes))
+            notes_density_list.append(len(notes) / note_window_size)
+        tonality_list = sorted(tonality_list)
+        tonality = sum(tonality_list)/len(tonality_list)
+        notes_bandwidth = sum(notes_bandwidth_list)/len(notes_bandwidth_list) if notes_bandwidth_list else 0
+        notes_density = max(notes_density_list) if notes_density_list else 0
+        piano_ratio = len(piano_channels) / len(channels)
+        if len(channels) <=3:  # ignore piano threshold if it is a piano solo midi
+            piano_max = 1
+        if alignment < alignment_min: # check weather the notes align to the bars (because some midi files are recorded)
+            reasons.append("alignment")
+        if tonality < tonality_min:  # check whether the music is tonal
+            reasons.append("tonality")
+        if notes_bandwidth < notes_bandwidth_min:  # check whether music is melodic line only
+            reasons.append("bandwidth")
+        if not notes_density_min < notes_density < notes_density_max:
+            reasons.append("density")
+        if piano_ratio > piano_max: # check whether most instruments is piano (because some midi files don't have instruments assigned correctly)
+            reasons.append("piano")
+        return not reasons, reasons
