@@ -60,7 +60,8 @@ class MIDITokenizer:
                 elif event[0] == "set_tempo":
                     if new_event[4] == 0: # invalid tempo
                         continue
-                    new_event[4] = int(self.tempo2bpm(new_event[4]))
+                    bpm = int(self.tempo2bpm(new_event[4]))
+                    new_event[4] = min(bpm, 255)
                 if event[0] == "note":
                     key = tuple(new_event[:4] + new_event[5:-1])
                 else:
