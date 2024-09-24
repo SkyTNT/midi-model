@@ -93,7 +93,7 @@ def send_msgs(msgs):
     return json.dumps(msgs)
 
 
-def run(tab, instruments, drum_kit, bpm, mid, midi_events, seed, seed_rand,
+def run(tab, instruments, drum_kit, bpm, mid, midi_events, midi_opt, seed, seed_rand,
         gen_events, temp, top_p, top_k, allow_cc, amp):
     mid_seq = []
     bpm = int(bpm)
@@ -125,7 +125,8 @@ def run(tab, instruments, drum_kit, bpm, mid, midi_events, seed, seed_rand,
             disable_patch_change = True
             disable_channels = [i for i in range(16) if i not in patches]
     elif mid is not None:
-        mid = tokenizer.tokenize(MIDI.midi2score(mid))
+        eps = 4 if midi_opt else 0
+        mid = tokenizer.tokenize(MIDI.midi2score(mid), cc_eps=eps, tempo_eps=eps)
         mid = np.asarray(mid, dtype=np.int64)
         mid = mid[:int(midi_events)]
         for token_seq in mid:
@@ -264,6 +265,7 @@ if __name__ == "__main__":
                 input_midi_events = gr.Slider(label="use first n midi events as prompt", minimum=1, maximum=512,
                                               step=1,
                                               value=128)
+                input_midi_opt = gr.Checkbox(label="optimise midi (uncheck if your midi is generate from this model)", value=True)
 
         tab1.select(lambda: 0, None, tab_select, queue=False)
         tab2.select(lambda: 1, None, tab_select, queue=False)
@@ -286,8 +288,9 @@ if __name__ == "__main__":
         output_audio = gr.Audio(label="output audio", format="mp3", elem_id="midi_audio")
         output_midi = gr.File(label="output midi", file_types=[".mid"])
         run_event = run_btn.click(run, [tab_select, input_instruments, input_drum_kit, input_bpm,
-                                        input_midi, input_midi_events, input_seed, input_seed_rand, input_gen_events,
-                                        input_temp, input_top_p, input_top_k, input_allow_cc, input_amp],
+                                        input_midi, input_midi_events, input_midi_opt, input_seed, input_seed_rand,
+                                        input_gen_events, input_temp, input_top_p, input_top_k,
+                                        input_allow_cc, input_amp],
                                   [output_midi_seq, output_midi, output_audio, input_seed, js_msg],
                                   concurrency_limit=3)
         stop_btn.click(cancel_run, [output_midi_seq], [output_midi, output_audio, js_msg], cancels=run_event,
