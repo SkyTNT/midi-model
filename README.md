@@ -4,6 +4,10 @@
 
 ![](./banner.png)
 
+## Updates
+
+- v1.2 : Optimise the tokenizer and dataset. The dataset was filtered by MIDITokenizer.check_quality. Using the higher quality dataset to train the model, the performance of the model is significantly improved.
+
 ## Demo
 
 - [online: huggingface](https://huggingface.co/spaces/skytnt/midi-composer)

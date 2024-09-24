@@ -11,7 +11,6 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.utilities import rank_zero_only
 from torch import optim
 from torch.optim.lr_scheduler import LambdaLR
-from torch.utils.data import Dataset
 from torch.utils.data import Dataset, DataLoader
 
 import MIDI
@@ -27,7 +26,7 @@ def file_ext(fname):
 
 class MidiDataset(Dataset):
     def __init__(self, midi_list, tokenizer: MIDITokenizer, max_len=2048, min_file_size=3000, max_file_size=384000,
-                 aug=True, check_quality=False):
+                 aug=True, check_quality=False, rand_start=True):
 
         self.tokenizer = tokenizer
         self.midi_list = midi_list
@@ -36,6 +35,7 @@ class MidiDataset(Dataset):
         self.max_file_size = max_file_size
         self.aug = aug
         self.check_quality = check_quality
+        self.rand_start = rand_start
 
     def __len__(self):
         return len(self.midi_list)
@@ -67,8 +67,12 @@ class MidiDataset(Dataset):
         # if mid.shape[0] < self.max_len:
         #     mid = np.pad(mid, ((0, self.max_len - mid.shape[0]), (0, 0)),
         #                  mode="constant", constant_values=self.tokenizer.pad_id)
-        start_idx = random.randrange(0, max(1, mid.shape[0] - self.max_len))
-        start_idx = random.choice([0, start_idx])
+        if self.rand_start:
+            start_idx = random.randrange(0, max(1, mid.shape[0] - self.max_len))
+            start_idx = random.choice([0, start_idx])
+        else:
+            max_start = max(1, mid.shape[0] - self.max_len)
+            start_idx = (index*(max_start//8)) % max_start
         mid = mid[start_idx: start_idx + self.max_len]
         mid = mid.astype(np.int64)
         mid = torch.from_numpy(mid)
@@ -97,13 +101,14 @@ def get_linear_schedule_with_warmup(optimizer, num_warmup_steps, num_training_st
 
 class TrainMIDIModel(MIDIModel):
     def __init__(self, tokenizer: MIDITokenizer, n_layer=12, n_head=16, n_embd=1024, n_inner=4096, flash=False,
-                 lr=2e-4, weight_decay=0.01, warmup=1e3, max_step=1e6):
+                 lr=2e-4, weight_decay=0.01, warmup=1e3, max_step=1e6, sample_seq=False):
         super(TrainMIDIModel, self).__init__(tokenizer=tokenizer, n_layer=n_layer, n_head=n_head, n_embd=n_embd,
                                              n_inner=n_inner, flash=flash)
         self.lr = lr
         self.weight_decay = weight_decay
         self.warmup = warmup
         self.max_step = max_step
+        self.sample_seq = sample_seq
 
     def configure_optimizers(self):
         param_optimizer = list(self.named_parameters())
@@ -141,10 +146,11 @@ class TrainMIDIModel(MIDIModel):
         x = batch[:, :-1].contiguous()  # (batch_size, midi_sequence_length, token_sequence_length)
         y = batch[:, 1:].contiguous()
         hidden = self.forward(x)
-        rand_idx = [-1] + random.sample(list(range(y.shape[1] - 2)), min(127, (y.shape[1] - 2) // 2))
-        hidden = hidden[:, rand_idx]
+        if self.sample_seq:  # to reduce vram
+            rand_idx = [-1] + random.sample(list(range(y.shape[1] - 2)), min(127, (y.shape[1] - 2) // 2))
+            hidden = hidden[:, rand_idx]
+            y = y[:, rand_idx]
         hidden = hidden.reshape(-1, hidden.shape[-1])
-        y = y[:, rand_idx]
         y = y.reshape(-1, y.shape[-1])  # (batch_size*midi_sequence_length, token_sequence_length)
         x = y[:, :-1]
         logits = self.forward_token(hidden, x)
@@ -257,7 +263,10 @@ if __name__ == '__main__':
     parser.add_argument("--max-step", type=int, default=1e6, help="max training step")
     parser.add_argument("--grad-clip", type=float, default=1.0, help="gradient clip val")
     parser.add_argument(
-        "--batch-size-train", type=int, default=8, help="batch size for training"
+        "--sample-seq", action="store_true", default=False, help="sample midi seq to reduce vram"
+    )
+    parser.add_argument(
+        "--batch-size-train", type=int, default=2, help="batch size for training"
     )
     parser.add_argument(
         "--batch-size-val", type=int, default=2, help="batch size for val"
@@ -314,8 +323,8 @@ if __name__ == '__main__':
     train_dataset_len = full_dataset_len - opt.data_val_split
     train_midi_list = midi_list[:train_dataset_len]
     val_midi_list = midi_list[train_dataset_len:]
-    train_dataset = MidiDataset(train_midi_list, tokenizer, max_len=opt.max_len, aug=True, check_quality=opt.quality)
-    val_dataset = MidiDataset(val_midi_list, tokenizer, max_len=opt.max_len, aug=False, check_quality=opt.quality)
+    train_dataset = MidiDataset(train_midi_list, tokenizer, max_len=opt.max_len, aug=True, check_quality=opt.quality, rand_start=True)
+    val_dataset = MidiDataset(val_midi_list, tokenizer, max_len=opt.max_len, aug=False, check_quality=opt.quality, rand_start=False)
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=opt.batch_size_train,
@@ -336,7 +345,7 @@ if __name__ == '__main__':
     )
     print(f"train: {len(train_dataset)}  val: {len(val_dataset)}")
     model = TrainMIDIModel(tokenizer, flash=True, lr=opt.lr, weight_decay=opt.weight_decay,
-                           warmup=opt.warmup_step, max_step=opt.max_step)
+                           warmup=opt.warmup_step, max_step=opt.max_step, sample_seq=opt.sample_seq)
     if opt.ckpt:
         ckpt = torch.load(opt.ckpt, map_location="cpu")
         state_dict = ckpt.get("state_dict", ckpt)

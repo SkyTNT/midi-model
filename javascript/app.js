@@ -146,13 +146,14 @@ class MidiVisualizer extends HTMLElement{
         this.setPlayTime(0);
     }
 
-    clearMidiEvents(){
+    clearMidiEvents(keepColor=false){
         this.pause()
         this.midiEvents = [];
         this.activeNotes = [];
         this.midiTimes = [];
         this.t1 = 0
-        this.colorMap.clear()
+        if (!keepColor)
+            this.colorMap.clear()
         this.setPlayTime(0);
         this.totalTimeMs = 0;
         this.playTimeMs = 0
@@ -419,18 +420,16 @@ customElements.define('midi-visualizer', MidiVisualizer);
             }
         }
     })
-    let handled_msgs = [];
     function handleMsg(msg){
-        if(handled_msgs.indexOf(msg.uuid)!== -1)
-            return;
-        handled_msgs.push(msg.uuid);
         switch (msg.name) {
             case "visualizer_clear":
-                midi_visualizer.clearMidiEvents();
+                midi_visualizer.clearMidiEvents(false);
                 createProgressBar(midi_visualizer_container_inited)
                 break;
             case "visualizer_append":
-                midi_visualizer.appendMidiEvent(msg.data);
+                msg.data.forEach( value => {
+                    midi_visualizer.appendMidiEvent(value);
+                })
                 break;
             case "progress":
                 let progress = msg.data[0]
@@ -438,10 +437,13 @@ customElements.define('midi-visualizer', MidiVisualizer);
                 setProgressBar(midi_visualizer_container_inited, progress, total)
                 break;
             case "visualizer_end":
+                midi_visualizer.clearMidiEvents(true);
+                msg.data.forEach( value => {
+                    midi_visualizer.appendMidiEvent(value);
+                })
                 midi_visualizer.finishAppendMidiEvent()
                 midi_visualizer.setPlayTime(0);
                 removeProgressBar(midi_visualizer_container_inited);
-                handled_msgs = []
                 break;
             default:
         }

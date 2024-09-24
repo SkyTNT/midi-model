@@ -53,7 +53,7 @@ class MIDIModel(pl.LightningModule):
         x = self.net.forward(inputs_embeds=x)
         return x.last_hidden_state
 
-    def sample_top_p_k(self, probs, p, k):
+    def sample_top_p_k(self, probs, p, k, generator=None):
         probs_sort, probs_idx = torch.sort(probs, dim=-1, descending=True)
         probs_sum = torch.cumsum(probs_sort, dim=-1)
         mask = probs_sum - probs_sort > p
@@ -63,12 +63,13 @@ class MIDIModel(pl.LightningModule):
         probs_sort = probs_sort * mask
         probs_sort.div_(probs_sort.sum(dim=-1, keepdim=True))
         shape = probs_sort.shape
-        next_token = torch.multinomial(probs_sort.reshape(-1, shape[-1]), num_samples=1).reshape(*shape[:-1], 1)
+        next_token = torch.multinomial(probs_sort.reshape(-1, shape[-1]),
+                                       num_samples=1, generator=generator).reshape(*shape[:-1], 1)
         next_token = torch.gather(probs_idx, -1, next_token).reshape(*shape[:-1])
         return next_token
 
     @torch.inference_mode()
-    def generate(self, prompt=None, max_len=512, temp=1.0, top_p=0.98, top_k=20, amp=True):
+    def generate(self, prompt=None, max_len=512, temp=1.0, top_p=0.98, top_k=20, amp=True, generator=None):
         tokenizer = self.tokenizer
         max_token_seq = tokenizer.max_token_seq
         if prompt is None:
@@ -99,7 +100,7 @@ class MIDIModel(pl.LightningModule):
 
                     logits = self.forward_token(hidden, next_token_seq)[:, -1:]
                     scores = torch.softmax(logits / temp, dim=-1) * mask
-                    sample = self.sample_top_p_k(scores, top_p, top_k)
+                    sample = self.sample_top_p_k(scores, top_p, top_k, generator=generator)
                     if i == 0:
                         next_token_seq = sample
                         eid = sample.item()
