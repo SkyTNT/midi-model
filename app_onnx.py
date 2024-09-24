@@ -339,7 +339,7 @@ if __name__ == "__main__":
         with gr.Accordion("options", open=False):
             input_temp = gr.Slider(label="temperature", minimum=0.1, maximum=1.2, step=0.01, value=1)
             input_top_p = gr.Slider(label="top p", minimum=0.1, maximum=1, step=0.01, value=0.98)
-            input_top_k = gr.Slider(label="top k", minimum=1, maximum=128, step=1, value=20)
+            input_top_k = gr.Slider(label="top k", minimum=1, maximum=128, step=1, value=10)
             input_allow_cc = gr.Checkbox(label="allow midi cc event", value=True)
             example3 = gr.Examples([[1, 0.98, 20], [1, 0.98, 12]], [input_temp, input_top_p, input_top_k])
         run_btn = gr.Button("generate", variant="primary")
