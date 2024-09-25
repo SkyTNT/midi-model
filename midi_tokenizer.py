@@ -112,7 +112,7 @@ class MIDITokenizer:
                 event_list[key] = new_event
         event_list = list(event_list.values())
 
-        empty_channels = [c for c, tr_map in track_idx_map.items() if len(tr_map) == 0]
+        empty_channels = [c for c in channels if len(track_idx_map[c]) == 0]
 
         if remap_track_channel:
             patch_channels = []
@@ -126,6 +126,7 @@ class MIDITokenizer:
                 if channels_count == 9:
                     channels_count = 10
             channels = list(channels_map.values())
+            empty_channels = [channels_map[c] for c in empty_channels]
 
             track_count = 0
             mapped_channels_order = [k for k,v in sorted(list(channels_map.items()), key=lambda x: x[1])]
@@ -153,7 +154,7 @@ class MIDITokenizer:
                         track_count += 1
                         tr_map[track_idx] = track_count
                     event[3] = next(iter(tr_map.values())) # move patch_change and control_change to first track of the channel
-                    if event[4] not in patch_channels:
+                    if name == "patch_change" and event[4] not in patch_channels:
                         patch_channels.append(event[4])
 
         if add_default_instr:
@@ -161,8 +162,10 @@ class MIDITokenizer:
                 if c not in patch_channels:
                     event_list.append(["patch_change", 0,0, track_idx_dict[c], c, 0])
 
-        event_list = sorted(event_list, key=lambda e: e[1:4])
-        midi_seq = []
+        events_name_order = {"set_tempo":0, "patch_change":1, "control_change":2, "note":3}
+        events_order = lambda e: e[1:4] + [events_name_order[e[0]]]
+        event_list = sorted(event_list, key=events_order)
+
         setup_events = {}
         notes_in_setup = False
         for i, event in enumerate(event_list):  # optimise setup
@@ -179,7 +182,7 @@ class MIDITokenizer:
                 pre_event = event_list[i - 1]
                 has_pre = event[1] + event[2] == pre_event[1] + pre_event[2]
             if (event[0] == "note" and not has_next) or (notes_in_setup and not has_pre) :
-                event_list = sorted(setup_events.values(), key=lambda e: 1 if e[0] == "note" else 0) + event_list[i:]
+                event_list = sorted(setup_events.values(), key=events_order) + event_list[i:]
                 break
             else:
                 if event[0] == "note":
@@ -188,6 +191,7 @@ class MIDITokenizer:
             setup_events[key] = new_event
 
         last_t1 = 0
+        midi_seq = []
         for event in event_list:
             if remove_empty_channels and event[0] in ["control_change", "patch_change"] and event[4] in empty_channels:
                 continue
@@ -360,7 +364,6 @@ class MIDITokenizer:
         notes_bandwidth_list = []
         instruments = {}
         piano_channels = []
-        undef_instrument = False
         abs_t1 = 0
         last_t = 0
         for tsi, tokens in enumerate(midi_seq):
@@ -377,7 +380,9 @@ class MIDITokenizer:
                 time_hist[t2] += 1
                 if c != 9:  # ignore drum channel
                     if c not in instruments:
-                        undef_instrument = True
+                        instruments[c] = 0
+                        if c not in piano_channels:
+                            piano_channels.append(c)
                     note_windows.setdefault(abs_t1 // note_window_size, []).append(p)
                 if last_t != t:
                     notes_sametime = [(et, p_) for et, p_ in notes_sametime if et > last_t]
@@ -398,8 +403,6 @@ class MIDITokenizer:
             reasons.append("total_min")
         if total_notes > total_notes_max:
             reasons.append("total_max")
-        if undef_instrument:
-            reasons.append("undef_instr")
         if len(note_windows) == 0 and total_notes > 0:
             reasons.append("drum_only")
         if reasons:
