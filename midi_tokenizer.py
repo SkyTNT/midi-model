@@ -42,9 +42,14 @@ class MIDITokenizer:
         tempo = int((60 / bpm) * 10 ** 6)
         return tempo
 
-    def tokenize(self, midi_score, add_bos_eos=True, cc_eps=4, tempo_eps=4):
+    def tokenize(self, midi_score, add_bos_eos=True, cc_eps=4, tempo_eps=4,
+                 remap_track_channel=False, add_default_instr=False, remove_empty_channels=False):
         ticks_per_beat = midi_score[0]
         event_list = {}
+        track_idx_map = {i: dict() for i in range(16)}
+        track_idx_dict = {}
+        channels = []
+        patch_channels = []
         for track_idx, track in enumerate(midi_score[1:129]):
             last_notes = {}
             patch_dict = {}
@@ -53,9 +58,15 @@ class MIDITokenizer:
             for event in track:
                 if event[0] not in self.events:
                     continue
+                c = -1
                 t = round(16 * event[1] / ticks_per_beat)  # quantization
                 new_event = [event[0], t // 16, t % 16, track_idx] + event[2:]
                 if event[0] == "note":
+                    c = event[3]
+                    track_idx_dict.setdefault(c, track_idx)
+                    tr_map = track_idx_map[c]  # put track_idx_map when note event to avoid empty track
+                    if track_idx not in tr_map:
+                        tr_map[track_idx] = 0
                     new_event[4] = max(1, round(16 * new_event[4] / ticks_per_beat))
                 elif event[0] == "set_tempo":
                     if new_event[4] == 0: # invalid tempo
@@ -72,6 +83,8 @@ class MIDITokenizer:
                     if last_p == p:
                         continue
                     patch_dict[c] = p
+                    if c not in patch_channels:
+                        patch_channels.append(c)
                 elif event[0] == "control_change":
                     c, cc, v = event[2:]
                     last_v = control_dict.setdefault((c, cc), 0)
@@ -84,6 +97,9 @@ class MIDITokenizer:
                         continue
                     last_tempo = tempo
 
+                if c != -1 and c not in channels:
+                    channels.append(c)
+
                 if event[0] == "note":  # to eliminate note overlap due to quantization
                     cp = tuple(new_event[5:7])
                     if cp in last_notes:
@@ -95,6 +111,56 @@ class MIDITokenizer:
                     last_notes[cp] = (key, new_event)
                 event_list[key] = new_event
         event_list = list(event_list.values())
+
+        empty_channels = [c for c, tr_map in track_idx_map.items() if len(tr_map) == 0]
+
+        if remap_track_channel:
+            patch_channels = []
+            channels_count = 0
+            channels_map = {9: 9} if 9 in channels else {}
+            for c in channels:
+                if c == 9:
+                    continue
+                channels_map[c] = channels_count
+                channels_count += 1
+                if channels_count == 9:
+                    channels_count = 10
+            channels = list(channels_map.values())
+
+            track_count = 0
+            mapped_channels_order = [k for k,v in sorted(list(channels_map.items()), key=lambda x: x[1])]
+            for c in mapped_channels_order:
+                tr_map = track_idx_map[c]
+                for key in tr_map:
+                    track_count += 1
+                    tr_map[key] = track_count
+
+            for event in event_list:
+                name = event[0]
+                track_idx = event[3]
+                if name == "note":
+                    c = event[5]
+                    event[5] = channels_map[c]
+                    event[3] = track_idx_map[c][track_idx]
+                    track_idx_dict[event[5]] = event[3]
+                elif name == "set_tempo":
+                    event[3] = 0
+                elif name == "control_change" or name == "patch_change":
+                    c = event[4]
+                    event[4] = channels_map[c]
+                    tr_map = track_idx_map[c]
+                    if len(tr_map) == 0: # empty channel
+                        track_count += 1
+                        tr_map[track_idx] = track_count
+                    event[3] = next(iter(tr_map.values())) # move patch_change and control_change to first track of the channel
+                    if event[4] not in patch_channels:
+                        patch_channels.append(event[4])
+
+        if add_default_instr:
+            for c in channels:
+                if c not in patch_channels:
+                    event_list.append(["patch_change", 0,0, track_idx_dict[c], c, 0])
+
         event_list = sorted(event_list, key=lambda e: e[1:4])
         midi_seq = []
         setup_events = {}
@@ -123,6 +189,8 @@ class MIDITokenizer:
 
         last_t1 = 0
         for event in event_list:
+            if remove_empty_channels and event[0] in ["control_change", "patch_change"] and event[4] in empty_channels:
+                continue
             cur_t1 = event[1]
             event[1] = event[1] - last_t1
             tokens = self.event2tokens(event)
@@ -181,7 +249,7 @@ class MIDITokenizer:
                 if track_idx not in tracks_dict:
                     tracks_dict[track_idx] = []
                 tracks_dict[track_idx].append([event[0], t] + event[4:])
-        tracks = list(tracks_dict.values())
+        tracks = [tr for idx, tr in sorted(list(tracks_dict.items()), key=lambda it: it[0])]
 
         for i in range(len(tracks)):  # to eliminate note overlap
             track = tracks[i]
