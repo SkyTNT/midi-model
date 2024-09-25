@@ -131,6 +131,8 @@ class MIDITokenizer:
             patch_channels = []
             channels_count = 0
             channels_map = {9: 9} if 9 in channels else {}
+            if remove_empty_channels:
+                channels = sorted(channels, key=lambda x: 1 if x in empty_channels else 0)
             for c in channels:
                 if c == 9:
                     continue
