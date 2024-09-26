@@ -386,7 +386,7 @@ class MIDITokenizer:
             midi_seq_new.append(tokens_new)
         return midi_seq_new
 
-    def check_quality(self, midi_seq, alignment_min=0.4, tonality_min=0.8, piano_max=0.7, notes_bandwidth_min=3, notes_density_max=30, notes_density_min=2.5, total_notes_max=10000, total_notes_min=500, note_window_size=16):
+    def check_quality(self, midi_seq, alignment_min=0.3, tonality_min=0.8, piano_max=0.7, notes_bandwidth_min=3, notes_density_max=50, notes_density_min=2.5, total_notes_max=20000, total_notes_min=256, note_window_size=16):
         total_notes = 0
         channels = []
         time_hist = [0] * 16

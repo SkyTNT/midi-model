@@ -5,3 +5,4 @@ transformers>=4.36
 pytorch_lightning
 gradio==4.43.0
 pyfluidsynth
+tqdm
