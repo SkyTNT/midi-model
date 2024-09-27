@@ -206,7 +206,7 @@ class MIDITokenizerV1:
 
         if add_default_instr:
             for c in channels:
-                if c not in patch_channels:
+                if c not in patch_channels and c in track_idx_dict:
                     event_list.append(["patch_change", 0, 0, track_idx_dict[c], c, 0])
 
         events_name_order = {"set_tempo": 0, "patch_change": 1, "control_change": 2, "note": 3}
@@ -720,7 +720,7 @@ class MIDITokenizerV2:
 
         if add_default_instr:
             for c in channels:
-                if c not in patch_channels:
+                if c not in patch_channels and c in track_idx_dict:
                     event_list.append(["patch_change", 0, 0, track_idx_dict[c], c, 0])
         events_name_order = ["time_signature", "key_signature", "set_tempo", "patch_change", "control_change", "note"]
         events_name_order = {name: i for i, name in enumerate(events_name_order)}
