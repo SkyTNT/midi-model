@@ -180,7 +180,7 @@ class MIDITokenizerV1:
                     tr_map[track_idx] = track_count
 
             empty_channels = [channels_map[c] for c in empty_channels]
-
+            track_idx_dict = {}
             for event in event_list:
                 name = event[0]
                 track_idx = event[3]
@@ -188,7 +188,8 @@ class MIDITokenizerV1:
                     c = event[5]
                     event[5] = channels_map[c]
                     event[3] = track_idx_map[c][track_idx]
-                    track_idx_dict[event[5]] = event[3]
+                    track_idx_dict.setdefault(event[5], event[3])
+                    # setdefault, so the track_idx is first of the channel
                 elif name == "set_tempo":
                     event[3] = 0
                 elif name == "control_change" or name == "patch_change":
@@ -694,7 +695,7 @@ class MIDITokenizerV2:
                     tr_map[track_idx] = track_count
 
             empty_channels = [channels_map[c] for c in empty_channels]
-
+            track_idx_dict = {}
             for event in event_list:
                 name = event[0]
                 track_idx = event[3]
@@ -702,7 +703,8 @@ class MIDITokenizerV2:
                     c = event[4]
                     event[4] = channels_map[c]  # channel
                     event[3] = track_idx_map[c][track_idx]  # track
-                    track_idx_dict[event[4]] = event[3]
+                    track_idx_dict.setdefault(event[4], event[3]) 
+                    # setdefault, so the track_idx is first of the channel
                 elif name in ["set_tempo", "time_signature", "key_signature"]:
                     event[3] = 0  # set track 0 for meta events
                 elif name == "control_change" or name == "patch_change":
