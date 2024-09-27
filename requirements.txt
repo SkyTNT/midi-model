@@ -2,7 +2,7 @@ Pillow
 numpy
 torch
 transformers>=4.36
-pytorch_lightning
+lightning==2.4.0
 gradio==4.43.0
 pyfluidsynth
 tqdm

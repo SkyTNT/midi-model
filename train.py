@@ -4,12 +4,12 @@ import random
 from typing import Union
 
 import numpy as np
-import pytorch_lightning as pl
+import lightning as pl
 import torch
 import torch.nn.functional as F
-from pytorch_lightning import Trainer
-from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.utilities import rank_zero_only
+from lightning import Trainer
+from lightning.fabric.utilities import rank_zero_only
+from lightning.pytorch.callbacks import ModelCheckpoint
 from torch import optim
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import Dataset, DataLoader
