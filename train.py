@@ -186,6 +186,7 @@ class TrainMIDIModel(MIDIModel):
         torch.cuda.empty_cache()
 
     def on_validation_end(self):
+        torch.cuda.synchronize()
         @rank_zero_only
         def gen_example():
             mid = self.generate()
