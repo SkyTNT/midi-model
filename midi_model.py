@@ -10,7 +10,7 @@ from transformers import LlamaModel, LlamaConfig
 
 from midi_tokenizer import MIDITokenizerV1, MIDITokenizerV2, MIDITokenizer
 
-config_name_list = ["tv1-medium", "tv2-medium", "tv2o-medium"]
+config_name_list = ["tv1-medium", "tv2-medium", "tv2o-medium", "tv2-large", "tv2o-large"]
 
 
 class MIDIModelConfig:
@@ -49,6 +49,9 @@ class MIDIModelConfig:
         if size == "medium":
             return MIDIModelConfig.get_config(tokenizer_ver=tv, optimise_midi=o,
                                               n_layer=12, n_head=16, n_embd=1024, n_inner=4096)
+        elif size == "large":
+            return MIDIModelConfig.get_config(tokenizer_ver=tv, optimise_midi=o,
+                                              n_layer=24, n_head=16, n_embd=1024, n_inner=4096)
         else:
             raise ValueError(f"Unknown model size {size}")
 

@@ -1,7 +1,7 @@
 import torch
 import argparse
 import torch.nn as nn
-from midi_model import MIDIModel
+from midi_model import MIDIModel, config_name_list, MIDIModelConfig
 from midi_tokenizer import MIDITokenizer
 
 
@@ -51,14 +51,18 @@ if __name__ == '__main__':
         "--ckpt", type=str, default="model.ckpt", help="load ckpt"
     )
     parser.add_argument(
+        "--config", type=str, default="tv2o-medium", choices=config_name_list, help="model config"
+    )
+    parser.add_argument(
         "--model-base-out", type=str, default="model_base.onnx", help="model base output path"
     )
     parser.add_argument(
         "--model-token-out", type=str, default="model_token.onnx", help="model token output path"
     )
     opt = parser.parse_args()
-    tokenizer = MIDITokenizer()
-    model = MIDIModel(tokenizer).to(device="cpu")
+    config = MIDIModelConfig.from_name(opt.config)
+    tokenizer = config.tokenizer
+    model = MIDIModel(config).to(device="cpu")
     ckpt = torch.load(opt.ckpt, map_location="cpu")
     state_dict = ckpt.get("state_dict", ckpt)
     model.load_state_dict(state_dict, strict=False)
