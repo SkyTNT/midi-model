@@ -2,6 +2,7 @@ import argparse
 import glob
 import json
 import time
+from typing import Union, Optional
 
 import gradio as gr
 import numpy as np
@@ -11,8 +12,8 @@ import torch.nn.functional as F
 import tqdm
 
 import MIDI
-from midi_model import MIDIModel
-from midi_tokenizer import MIDITokenizer
+from midi_model import MIDIModel, config_name_list, MIDIModelConfig
+from midi_tokenizer import MIDITokenizerV1, MIDITokenizerV2
 from midi_synthesizer import synthesis
 from huggingface_hub import hf_hub_download
 
@@ -174,7 +175,10 @@ def cancel_run(mid_seq):
     return "output.mid", (44100, audio), send_msgs([create_msg("visualizer_end", events)])
 
 
-def load_model(path):
+def load_model(path,model_config):
+    global model, tokenizer
+    model = MIDIModel(config=MIDIModelConfig.from_name(model_config)).to(opt.device)
+    tokenizer = model.tokenizer
     ckpt = torch.load(path, map_location="cpu")
     state_dict = ckpt.get("state_dict", ckpt)
     model.load_state_dict(state_dict, strict=False)
@@ -216,8 +220,8 @@ if __name__ == "__main__":
     parser.add_argument("--device", type=str, default="cuda", help="device to run model")
     soundfont_path = hf_hub_download(repo_id="skytnt/midi-model", filename="soundfont.sf2")
     opt = parser.parse_args()
-    tokenizer = MIDITokenizer()
-    model = MIDIModel(tokenizer).to(device=opt.device)
+    tokenizer: Union[MIDITokenizerV1, MIDITokenizerV2, None] = None
+    model: Optional[MIDIModel] = None
 
     load_javascript()
     app = gr.Blocks()
@@ -234,11 +238,12 @@ if __name__ == "__main__":
         with gr.Accordion(label="Model option", open=True):
             load_model_path_btn = gr.Button("Get Models")
             model_path_input = gr.Dropdown(label="model")
+            model_config_input = gr.Dropdown(label="config", choices=config_name_list, value=config_name_list[0])
             load_model_path_btn.click(get_model_path, [], model_path_input)
             load_model_btn = gr.Button("Load")
             model_msg = gr.Textbox()
             load_model_btn.click(
-                load_model, model_path_input, model_msg
+                load_model, [model_path_input, model_config_input], model_msg
             )
         tab_select = gr.State(value=0)
         with gr.Tabs():

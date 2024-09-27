@@ -1,6 +1,7 @@
 import argparse
 import os
 import random
+from typing import Union
 
 import numpy as np
 import pytorch_lightning as pl
@@ -14,8 +15,8 @@ from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import Dataset, DataLoader
 
 import MIDI
-from midi_model import MIDIModel
-from midi_tokenizer import MIDITokenizer
+from midi_model import MIDIModel, MIDIModelConfig, config_name_list
+from midi_tokenizer import MIDITokenizer, MIDITokenizerV1, MIDITokenizerV2
 
 EXTENSION = [".mid", ".midi"]
 
@@ -25,7 +26,7 @@ def file_ext(fname):
 
 
 class MidiDataset(Dataset):
-    def __init__(self, midi_list, tokenizer: MIDITokenizer, max_len=2048, min_file_size=3000, max_file_size=384000,
+    def __init__(self, midi_list, tokenizer: Union[MIDITokenizerV1, MIDITokenizerV2], max_len=2048, min_file_size=3000, max_file_size=384000,
                  aug=True, check_quality=False, rand_start=True):
 
         self.tokenizer = tokenizer
@@ -100,10 +101,9 @@ def get_linear_schedule_with_warmup(optimizer, num_warmup_steps, num_training_st
 
 
 class TrainMIDIModel(MIDIModel):
-    def __init__(self, tokenizer: MIDITokenizer, n_layer=12, n_head=16, n_embd=1024, n_inner=4096, flash=False,
+    def __init__(self, config: MIDIModelConfig, flash=False,
                  lr=2e-4, weight_decay=0.01, warmup=1e3, max_step=1e6, sample_seq=False):
-        super(TrainMIDIModel, self).__init__(tokenizer=tokenizer, n_layer=n_layer, n_head=n_head, n_embd=n_embd,
-                                             n_inner=n_inner, flash=flash)
+        super(TrainMIDIModel, self).__init__(config, flash=flash)
         self.lr = lr
         self.weight_decay = weight_decay
         self.warmup = warmup
@@ -234,6 +234,9 @@ if __name__ == '__main__':
     parser.add_argument(
         "--ckpt", type=str, default="", help="load ckpt"
     )
+    parser.add_argument(
+        "--config", type=str, default="tv2-medium", choices=config_name_list, help="model config"
+    )
 
     # dataset args
     parser.add_argument(
@@ -316,7 +319,8 @@ if __name__ == '__main__':
         os.mkdir("sample")
     pl.seed_everything(opt.seed)
     print("---load dataset---")
-    tokenizer = MIDITokenizer()
+    config = MIDIModelConfig.from_name(opt.config)
+    tokenizer = config.tokenizer
     midi_list = get_midi_list(opt.data)
     random.shuffle(midi_list)
     full_dataset_len = len(midi_list)
@@ -344,7 +348,7 @@ if __name__ == '__main__':
         collate_fn=collate_fn
     )
     print(f"train: {len(train_dataset)}  val: {len(val_dataset)}")
-    model = TrainMIDIModel(tokenizer, flash=True, lr=opt.lr, weight_decay=opt.weight_decay,
+    model = TrainMIDIModel(config, flash=True, lr=opt.lr, weight_decay=opt.weight_decay,
                            warmup=opt.warmup_step, max_step=opt.max_step, sample_seq=opt.sample_seq)
     if opt.ckpt:
         ckpt = torch.load(opt.ckpt, map_location="cpu")

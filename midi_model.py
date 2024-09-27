@@ -1,3 +1,5 @@
+from typing import Union
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -6,26 +8,54 @@ import tqdm
 import pytorch_lightning as pl
 from transformers import LlamaModel, LlamaConfig
 
-from midi_tokenizer import MIDITokenizer
+from midi_tokenizer import MIDITokenizerV1, MIDITokenizerV2, MIDITokenizer
+
+config_name_list = ["tv1-medium", "tv2-medium"]
+
+class MIDIModelConfig:
+    def __init__(self, tokenizer: Union[MIDITokenizerV1, MIDITokenizerV2],
+                 net_config: LlamaConfig, net_token_config: LlamaConfig):
+        self.tokenizer = tokenizer
+        self.net_config = net_config
+        self.net_token_config = net_token_config
+        self.n_embd = net_token_config.hidden_size
+
+
+    @staticmethod
+    def get_config(tokenizer_ver="v2", n_layer=12, n_head=16, n_embd=1024, n_inner=4096):
+        tokenizer = MIDITokenizer(tokenizer_ver)
+        net_config = LlamaConfig(vocab_size=tokenizer.vocab_size,
+                               hidden_size=n_embd, num_attention_heads=n_head,
+                               num_hidden_layers=n_layer, intermediate_size=n_inner,
+                               pad_token_id=tokenizer.pad_id, max_position_embeddings=4096)
+        net_token_config = LlamaConfig(vocab_size=tokenizer.vocab_size,
+                                        hidden_size=n_embd, num_attention_heads=n_head // 4,
+                                        num_hidden_layers=n_layer // 4, intermediate_size=n_inner // 4,
+                                        pad_token_id=tokenizer.pad_id, max_position_embeddings=4096)
+        return MIDIModelConfig(tokenizer, net_config, net_token_config)
+
+    @staticmethod
+    def from_name(name="tv2-medium"):
+        tv, size = name.split("-")
+        tv = tv[1:]
+        if tv not in ["v1", "v2"]:
+            raise ValueError(f"Unknown tokenizer version {tv}")
+        if size == "medium":
+            return MIDIModelConfig.get_config(tokenizer_ver=tv, n_layer=12, n_head=16, n_embd=1024, n_inner=4096)
+        else:
+            raise ValueError(f"Unknown model size {size}")
 
 
 class MIDIModel(pl.LightningModule):
-    def __init__(self, tokenizer: MIDITokenizer, n_layer=12, n_head=16, n_embd=1024, n_inner=4096, flash=False,
-                 *args, **kwargs):
+    def __init__(self, config: MIDIModelConfig, flash=False, *args, **kwargs):
         super(MIDIModel, self).__init__()
-        self.tokenizer = tokenizer
-        self.net = LlamaModel(LlamaConfig(vocab_size=tokenizer.vocab_size,
-                                          hidden_size=n_embd, num_attention_heads=n_head,
-                                          num_hidden_layers=n_layer, intermediate_size=n_inner,
-                                          pad_token_id=tokenizer.pad_id, max_position_embeddings=4096))
-        self.net_token = LlamaModel(LlamaConfig(vocab_size=tokenizer.vocab_size,
-                                                hidden_size=n_embd, num_attention_heads=n_head // 4,
-                                                num_hidden_layers=n_layer // 4, intermediate_size=n_inner // 4,
-                                                pad_token_id=tokenizer.pad_id, max_position_embeddings=4096))
         if flash:
             torch.backends.cuda.enable_mem_efficient_sdp(True)
             torch.backends.cuda.enable_flash_sdp(True)
-        self.lm_head = nn.Linear(n_embd, tokenizer.vocab_size, bias=False)
+        self.tokenizer = config.tokenizer
+        self.net = LlamaModel(config.net_config)
+        self.net_token = LlamaModel(config.net_token_config)
+        self.lm_head = nn.Linear(config.n_embd, self.tokenizer.vocab_size, bias=False)
 
     def forward_token(self, hidden_state, x=None):
         """
