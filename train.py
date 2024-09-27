@@ -102,13 +102,14 @@ def get_linear_schedule_with_warmup(optimizer, num_warmup_steps, num_training_st
 
 class TrainMIDIModel(MIDIModel):
     def __init__(self, config: MIDIModelConfig, flash=False,
-                 lr=2e-4, weight_decay=0.01, warmup=1e3, max_step=1e6, sample_seq=False):
+                 lr=2e-4, weight_decay=0.01, warmup=1e3, max_step=1e6, sample_seq=False, gen_example=True):
         super(TrainMIDIModel, self).__init__(config, flash=flash)
         self.lr = lr
         self.weight_decay = weight_decay
         self.warmup = warmup
         self.max_step = max_step
         self.sample_seq = sample_seq
+        self.gen_example = gen_example
 
     def configure_optimizers(self):
         param_optimizer = list(self.named_parameters())
@@ -205,11 +206,11 @@ class TrainMIDIModel(MIDIModel):
             img.save(f"sample/{self.global_step}_1_ori.png")
             with open(f"sample/{self.global_step}_1.mid", 'wb') as f:
                 f.write(MIDI.score2midi(mid))
-
-        try:
-            gen_example()
-        except Exception as e:
-            print(e)
+        if self.gen_example:
+            try:
+                gen_example()
+            except Exception as e:
+                print(e)
         torch.cuda.empty_cache()
 
 
@@ -269,6 +270,9 @@ if __name__ == '__main__':
         "--sample-seq", action="store_true", default=False, help="sample midi seq to reduce vram"
     )
     parser.add_argument(
+        "--disable-gen-example", action="store_true", default=False, help="disable generate example on validation end"
+    )
+    parser.add_argument(
         "--batch-size-train", type=int, default=2, help="batch size for training"
     )
     parser.add_argument(
@@ -297,6 +301,7 @@ if __name__ == '__main__':
         help="accelerator",
     )
     parser.add_argument("--devices", type=int, default=-1, help="devices num")
+    parser.add_argument("--nodes", type=int, default=1, help="nodes num")
     parser.add_argument(
         "--fp32", action="store_true", default=False, help="disable mix precision"
     )
@@ -349,7 +354,8 @@ if __name__ == '__main__':
     )
     print(f"train: {len(train_dataset)}  val: {len(val_dataset)}")
     model = TrainMIDIModel(config, flash=True, lr=opt.lr, weight_decay=opt.weight_decay,
-                           warmup=opt.warmup_step, max_step=opt.max_step, sample_seq=opt.sample_seq)
+                           warmup=opt.warmup_step, max_step=opt.max_step,
+                           sample_seq=opt.sample_seq, gen_example=not opt.disable_gen_example)
     if opt.ckpt:
         ckpt = torch.load(opt.ckpt, map_location="cpu")
         state_dict = ckpt.get("state_dict", ckpt)
@@ -371,11 +377,12 @@ if __name__ == '__main__':
         gradient_clip_val=opt.grad_clip,
         accelerator="gpu",
         devices=opt.devices,
+        num_nodes=opt.nodes,
         max_steps=opt.max_step,
         benchmark=not opt.disable_benchmark,
         val_check_interval=opt.val_step,
         log_every_n_steps=1,
-        strategy="ddp",
+        strategy="auto",
         callbacks=callbacks,
     )
     ckpt_path = opt.resume

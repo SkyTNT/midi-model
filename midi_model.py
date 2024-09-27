@@ -106,7 +106,7 @@ class MIDIModel(pl.LightningModule):
         return next_token
 
     @torch.inference_mode()
-    def generate(self, prompt=None, max_len=512, temp=1.0, top_p=0.98, top_k=20, amp=True, generator=None):
+    def generate(self, prompt=None, max_len=512, temp=1.0, top_p=0.98, top_k=20, generator=None):
         tokenizer = self.tokenizer
         max_token_seq = tokenizer.max_token_seq
         if prompt is None:
@@ -121,7 +121,7 @@ class MIDIModel(pl.LightningModule):
         input_tensor = input_tensor.unsqueeze(0)
         cur_len = input_tensor.shape[1]
         bar = tqdm.tqdm(desc="generating", total=max_len - cur_len)
-        with bar, torch.cuda.amp.autocast(enabled=amp):
+        with bar:
             while cur_len < max_len:
                 end = False
                 hidden = self.forward(input_tensor)[0, -1].unsqueeze(0)
