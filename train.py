@@ -211,6 +211,7 @@ class TrainMIDIModel(MIDIModel):
                 gen_example()
             except Exception as e:
                 print(e)
+        torch.cuda.synchronize()
         torch.cuda.empty_cache()
 
 
