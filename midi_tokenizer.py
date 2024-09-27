@@ -7,6 +7,7 @@ import numpy as np
 class MIDITokenizerV1:
     def __init__(self):
         self.version = "v1"
+        self.optimise_midi = False
         self.vocab_size = 0
 
         def allocate_ids(size):
@@ -32,6 +33,9 @@ class MIDITokenizerV1:
         self.parameter_ids = {p: allocate_ids(s) for p, s in self.event_parameters.items()}
         self.max_token_seq = max([len(ps) for ps in self.events.values()]) + 1
 
+    def set_optimise_midi(self, optimise_midi=True):
+        self.optimise_midi = optimise_midi
+
     @staticmethod
     def tempo2bpm(tempo):
         tempo = tempo / 10 ** 6  # us to s
@@ -46,7 +50,14 @@ class MIDITokenizerV1:
         return tempo
 
     def tokenize(self, midi_score, add_bos_eos=True, cc_eps=4, tempo_eps=4,
-                 remap_track_channel=False, add_default_instr=False, remove_empty_channels=False):
+                 remap_track_channel=None, add_default_instr=None, remove_empty_channels=None):
+        if remap_track_channel is None:  # set default value
+            remap_track_channel = self.optimise_midi
+        if add_default_instr is None:
+            add_default_instr = self.optimise_midi
+        if remove_empty_channels is None:
+            remove_empty_channels = self.optimise_midi
+
         ticks_per_beat = midi_score[0]
         event_list = {}
         track_idx_map = {i: dict() for i in range(16)}
@@ -477,6 +488,7 @@ class MIDITokenizerV1:
 class MIDITokenizerV2:
     def __init__(self):
         self.version = "v2"
+        self.optimise_midi = False
         self.vocab_size = 0
 
         def allocate_ids(size):
@@ -503,6 +515,9 @@ class MIDITokenizerV2:
         self.id_events = {i: e for e, i in self.event_ids.items()}
         self.parameter_ids = {p: allocate_ids(s) for p, s in self.event_parameters.items()}
         self.max_token_seq = max([len(ps) for ps in self.events.values()]) + 1
+
+    def set_optimise_midi(self, optimise_midi=True):
+        self.optimise_midi = optimise_midi
 
     @staticmethod
     def tempo2bpm(tempo):
@@ -532,7 +547,14 @@ class MIDITokenizerV2:
         return sf
 
     def tokenize(self, midi_score, add_bos_eos=True, cc_eps=4, tempo_eps=4,
-                 remap_track_channel=False, add_default_instr=False, remove_empty_channels=False):
+                 remap_track_channel=None, add_default_instr=None, remove_empty_channels=None):
+        if remap_track_channel is None:  # set default value
+            remap_track_channel = self.optimise_midi
+        if add_default_instr is None:
+            add_default_instr = self.optimise_midi
+        if remove_empty_channels is None:
+            remove_empty_channels = self.optimise_midi
+
         ticks_per_beat = midi_score[0]
         event_list = {}
         track_idx_map = {i: dict() for i in range(16)}

@@ -235,7 +235,7 @@ if __name__ == '__main__':
         "--ckpt", type=str, default="", help="load ckpt"
     )
     parser.add_argument(
-        "--config", type=str, default="tv2-medium", choices=config_name_list, help="model config"
+        "--config", type=str, default="tv2o-medium", choices=config_name_list, help="model config"
     )
 
     # dataset args

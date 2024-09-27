@@ -10,7 +10,7 @@ from transformers import LlamaModel, LlamaConfig
 
 from midi_tokenizer import MIDITokenizerV1, MIDITokenizerV2, MIDITokenizer
 
-config_name_list = ["tv1-medium", "tv2-medium"]
+config_name_list = ["tv1-medium", "tv2-medium", "tv2o-medium"]
 
 
 class MIDIModelConfig:
@@ -22,8 +22,9 @@ class MIDIModelConfig:
         self.n_embd = net_token_config.hidden_size
 
     @staticmethod
-    def get_config(tokenizer_ver="v2", n_layer=12, n_head=16, n_embd=1024, n_inner=4096):
+    def get_config(tokenizer_ver="v2", optimise_midi=True, n_layer=12, n_head=16, n_embd=1024, n_inner=4096):
         tokenizer = MIDITokenizer(tokenizer_ver)
+        tokenizer.set_optimise_midi(optimise_midi)
         net_config = LlamaConfig(vocab_size=tokenizer.vocab_size,
                                  hidden_size=n_embd, num_attention_heads=n_head,
                                  num_hidden_layers=n_layer, intermediate_size=n_inner,
@@ -35,13 +36,19 @@ class MIDIModelConfig:
         return MIDIModelConfig(tokenizer, net_config, net_token_config)
 
     @staticmethod
-    def from_name(name="tv2-medium"):
+    def from_name(name="tv2o-medium"):
         tv, size = name.split("-")
         tv = tv[1:]
+        if tv[-1] == "o":
+            o = True
+            tv = tv[:-1]
+        else:
+            o = False
         if tv not in ["v1", "v2"]:
             raise ValueError(f"Unknown tokenizer version {tv}")
         if size == "medium":
-            return MIDIModelConfig.get_config(tokenizer_ver=tv, n_layer=12, n_head=16, n_embd=1024, n_inner=4096)
+            return MIDIModelConfig.get_config(tokenizer_ver=tv, optimise_midi=o,
+                                              n_layer=12, n_head=16, n_embd=1024, n_inner=4096)
         else:
             raise ValueError(f"Unknown model size {size}")
 
