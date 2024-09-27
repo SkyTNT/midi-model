@@ -53,7 +53,7 @@ class MIDITokenizerV1:
         track_idx_dict = {}
         channels = []
         patch_channels = []
-        empty_channels = [True]*16
+        empty_channels = [True] * 16
         channel_note_tracks = {i: list() for i in range(16)}
         for track_idx, track in enumerate(midi_score[1:129]):
             last_notes = {}
@@ -77,7 +77,7 @@ class MIDITokenizerV1:
                         note_tracks.append(track_idx)
                     new_event[4] = max(1, round(16 * new_event[4] / ticks_per_beat))
                 elif event[0] == "set_tempo":
-                    if new_event[4] == 0: # invalid tempo
+                    if new_event[4] == 0:  # invalid tempo
                         continue
                     bpm = int(self.tempo2bpm(new_event[4]))
                     new_event[4] = min(bpm, 255)
@@ -146,8 +146,8 @@ class MIDITokenizerV1:
             channels = list(channels_map.values())
 
             track_count = 0
-            track_idx_map_order = [k for k,v in sorted(list(channels_map.items()), key=lambda x: x[1])]
-            for c in track_idx_map_order: # tracks not to remove
+            track_idx_map_order = [k for k, v in sorted(list(channels_map.items()), key=lambda x: x[1])]
+            for c in track_idx_map_order:  # tracks not to remove
                 if remove_empty_channels and c in empty_channels:
                     continue
                 tr_map = track_idx_map[c]
@@ -157,7 +157,7 @@ class MIDITokenizerV1:
                         continue
                     track_count += 1
                     tr_map[track_idx] = track_count
-            for c in track_idx_map_order: # tracks to remove
+            for c in track_idx_map_order:  # tracks to remove
                 if not (remove_empty_channels and c in empty_channels):
                     continue
                 tr_map = track_idx_map[c]
@@ -196,9 +196,9 @@ class MIDITokenizerV1:
         if add_default_instr:
             for c in channels:
                 if c not in patch_channels:
-                    event_list.append(["patch_change", 0,0, track_idx_dict[c], c, 0])
+                    event_list.append(["patch_change", 0, 0, track_idx_dict[c], c, 0])
 
-        events_name_order = {"set_tempo":0, "patch_change":1, "control_change":2, "note":3}
+        events_name_order = {"set_tempo": 0, "patch_change": 1, "control_change": 2, "note": 3}
         events_order = lambda e: e[1:4] + [events_name_order[e[0]]]
         event_list = sorted(event_list, key=events_order)
 
@@ -217,7 +217,7 @@ class MIDITokenizerV1:
             if notes_in_setup and i > 0:
                 pre_event = event_list[i - 1]
                 has_pre = event[1] + event[2] == pre_event[1] + pre_event[2]
-            if (event[0] == "note" and not has_next) or (notes_in_setup and not has_pre) :
+            if (event[0] == "note" and not has_next) or (notes_in_setup and not has_pre):
                 event_list = sorted(setup_events.values(), key=events_order) + event_list[i:]
                 break
             else:
@@ -389,7 +389,9 @@ class MIDITokenizerV1:
             midi_seq_new.append(tokens_new)
         return midi_seq_new
 
-    def check_quality(self, midi_seq, alignment_min=0.3, tonality_min=0.8, piano_max=0.7, notes_bandwidth_min=3, notes_density_max=50, notes_density_min=2.5, total_notes_max=20000, total_notes_min=256, note_window_size=16):
+    def check_quality(self, midi_seq, alignment_min=0.3, tonality_min=0.8, piano_max=0.7, notes_bandwidth_min=3,
+                      notes_density_max=50, notes_density_min=2.5, total_notes_max=20000, total_notes_min=256,
+                      note_window_size=16):
         total_notes = 0
         channels = []
         time_hist = [0] * 16
@@ -453,13 +455,13 @@ class MIDITokenizerV1:
             tonality_list.append(sum(key_hist[:7]) / len(notes))
             notes_density_list.append(len(notes) / note_window_size)
         tonality_list = sorted(tonality_list)
-        tonality = sum(tonality_list)/len(tonality_list)
-        notes_bandwidth = sum(notes_bandwidth_list)/len(notes_bandwidth_list) if notes_bandwidth_list else 0
+        tonality = sum(tonality_list) / len(tonality_list)
+        notes_bandwidth = sum(notes_bandwidth_list) / len(notes_bandwidth_list) if notes_bandwidth_list else 0
         notes_density = max(notes_density_list) if notes_density_list else 0
         piano_ratio = len(piano_channels) / len(channels)
-        if len(channels) <=3:  # ignore piano threshold if it is a piano solo midi
+        if len(channels) <= 3:  # ignore piano threshold if it is a piano solo midi
             piano_max = 1
-        if alignment < alignment_min: # check weather the notes align to the bars (because some midi files are recorded)
+        if alignment < alignment_min:  # check weather the notes align to the bars (because some midi files are recorded)
             reasons.append("alignment")
         if tonality < tonality_min:  # check whether the music is tonal
             reasons.append("tonality")
@@ -467,9 +469,10 @@ class MIDITokenizerV1:
             reasons.append("bandwidth")
         if not notes_density_min < notes_density < notes_density_max:
             reasons.append("density")
-        if piano_ratio > piano_max: # check whether most instruments is piano (because some midi files don't have instruments assigned correctly)
+        if piano_ratio > piano_max:  # check whether most instruments is piano (because some midi files don't have instruments assigned correctly)
             reasons.append("piano")
         return not reasons, reasons
+
 
 class MIDITokenizerV2:
     def __init__(self):
@@ -536,7 +539,7 @@ class MIDITokenizerV2:
         track_idx_dict = {}
         channels = []
         patch_channels = []
-        empty_channels = [True]*16
+        empty_channels = [True] * 16
         channel_note_tracks = {i: list() for i in range(16)}
         for track_idx, track in enumerate(midi_score[1:129]):
             last_notes = {}
@@ -551,7 +554,7 @@ class MIDITokenizerV2:
                 t = round(16 * event[1] / ticks_per_beat)  # quantization
                 new_event = [name, t // 16, t % 16, track_idx]
                 if name == "note":
-                    d, c, p ,v = event[2:]
+                    d, c, p, v = event[2:]
                     if not (0 <= c <= 15):
                         continue
                     d = max(1, round(16 * d / ticks_per_beat))
@@ -583,7 +586,7 @@ class MIDITokenizerV2:
                     control_dict[(c, cc)] = v
                 elif name == "set_tempo":
                     tempo = event[2]
-                    if tempo == 0: # invalid tempo
+                    if tempo == 0:  # invalid tempo
                         continue
                     bpm = min(int(self.tempo2bpm(tempo)), 383)
                     new_event += [bpm]
@@ -592,14 +595,14 @@ class MIDITokenizerV2:
                     last_bpm = bpm
                 elif name == "time_signature":
                     nn, dd = event[2:4]
-                    if not (1 <= nn <= 16 and 1 <= dd <= 4): # invalid
+                    if not (1 <= nn <= 16 and 1 <= dd <= 4):  # invalid
                         continue
                     nn -= 1  # make it start from 0
                     dd -= 1
                     new_event += [nn, dd]
                 elif name == "key_signature":
                     sf, mi = event[2:]
-                    if not (-7 <= sf <= 7 and 0 <= mi <= 1): # invalid
+                    if not (-7 <= sf <= 7 and 0 <= mi <= 1):  # invalid
                         continue
                     sf += 7
                     new_event += [sf, mi]
@@ -617,11 +620,11 @@ class MIDITokenizerV2:
                         tr_map[track_idx] = 0
 
                 if event[0] == "note":  # to eliminate note overlap due to quantization
-                    cp = tuple(new_event[4:6]) # channel pitch
+                    cp = tuple(new_event[4:6])  # channel pitch
                     if cp in last_notes:
                         last_note_key, last_note = last_notes[cp]
                         last_t = last_note[1] * 16 + last_note[2]
-                        last_note[-1] = max(0, min(last_note[-1], t - last_t)) # modify duration
+                        last_note[-1] = max(0, min(last_note[-1], t - last_t))  # modify duration
                         if last_note[-1] == 0:
                             event_list.pop(last_note_key)
                     last_notes[cp] = (key, new_event)
@@ -646,8 +649,8 @@ class MIDITokenizerV2:
             channels = list(channels_map.values())
 
             track_count = 0
-            track_idx_map_order = [k for k,v in sorted(list(channels_map.items()), key=lambda x: x[1])]
-            for c in track_idx_map_order: # tracks not to remove
+            track_idx_map_order = [k for k, v in sorted(list(channels_map.items()), key=lambda x: x[1])]
+            for c in track_idx_map_order:  # tracks not to remove
                 if remove_empty_channels and c in empty_channels:
                     continue
                 tr_map = track_idx_map[c]
@@ -657,7 +660,7 @@ class MIDITokenizerV2:
                         continue
                     track_count += 1
                     tr_map[track_idx] = track_count
-            for c in track_idx_map_order: # tracks to remove
+            for c in track_idx_map_order:  # tracks to remove
                 if not (remove_empty_channels and c in empty_channels):
                     continue
                 tr_map = track_idx_map[c]
@@ -675,14 +678,14 @@ class MIDITokenizerV2:
                 track_idx = event[3]
                 if name == "note":
                     c = event[4]
-                    event[4] = channels_map[c] # channel
-                    event[3] = track_idx_map[c][track_idx] # track
+                    event[4] = channels_map[c]  # channel
+                    event[3] = track_idx_map[c][track_idx]  # track
                     track_idx_dict[event[4]] = event[3]
                 elif name in ["set_tempo", "time_signature", "key_signature"]:
-                    event[3] = 0 # set track 0 for meta events
+                    event[3] = 0  # set track 0 for meta events
                 elif name == "control_change" or name == "patch_change":
                     c = event[4]
-                    event[4] = channels_map[c] # channel
+                    event[4] = channels_map[c]  # channel
                     tr_map = track_idx_map[c]
                     # move the event to first track of the channel if it's original track is empty
                     note_tracks = channel_note_tracks[c]
@@ -696,7 +699,7 @@ class MIDITokenizerV2:
         if add_default_instr:
             for c in channels:
                 if c not in patch_channels:
-                    event_list.append(["patch_change", 0,0, track_idx_dict[c], c, 0])
+                    event_list.append(["patch_change", 0, 0, track_idx_dict[c], c, 0])
         events_name_order = ["time_signature", "key_signature", "set_tempo", "patch_change", "control_change", "note"]
         events_name_order = {name: i for i, name in enumerate(events_name_order)}
         events_order = lambda e: e[1:4] + [events_name_order[e[0]]]
@@ -705,7 +708,7 @@ class MIDITokenizerV2:
         setup_events = {}
         notes_in_setup = False
         for i, event in enumerate(event_list):  # optimise setup
-            new_event = [*event] # make copy of event
+            new_event = [*event]  # make copy of event
             if event[0] not in ["note", "time_signature"]:
                 new_event[1] = 0
                 new_event[2] = 0
@@ -717,7 +720,7 @@ class MIDITokenizerV2:
             if notes_in_setup and i > 0:
                 pre_event = event_list[i - 1]
                 has_pre = event[1] + event[2] == pre_event[1] + pre_event[2]
-            if (event[0] == "note" and not has_next) or (notes_in_setup and not has_pre) :
+            if (event[0] == "note" and not has_next) or (notes_in_setup and not has_pre):
                 event_list = sorted(setup_events.values(), key=events_order) + event_list[i:]
                 break
             else:
@@ -768,7 +771,6 @@ class MIDITokenizerV2:
         event = [name] + params
         return event
 
-
     def detokenize(self, midi_seq):
         ticks_per_beat = 480
         tracks_dict = {}
@@ -796,12 +798,12 @@ class MIDITokenizerV2:
                     nn, dd = event[4:]
                     nn += 1
                     dd += 1
-                    event_new += [nn, dd, 24, 8] # usually cc, bb = 24, 8
+                    event_new += [nn, dd, 24, 8]  # usually cc, bb = 24, 8
                 elif name == "key_signature":
                     sf, mi = event[4:]
                     sf -= 7
                     event_new += [sf, mi]
-                else: # should not go here
+                else:  # should not go here
                     continue
                 if track_idx not in tracks_dict:
                     tracks_dict[track_idx] = []
@@ -908,7 +910,7 @@ class MIDITokenizerV2:
                     mi = tokens[5] - self.parameter_ids["mi"][0]
                     sf -= 7
                     n = self.sf2note(sf)
-                    n = (n + pitch_shift)%12
+                    n = (n + pitch_shift) % 12
                     sf = self.note2sf(n, mi)
                     sf += 7
                     tokens_new[4] = self.parameter_ids["sf"][sf]
@@ -916,7 +918,9 @@ class MIDITokenizerV2:
             midi_seq_new.append(tokens_new)
         return midi_seq_new
 
-    def check_quality(self, midi_seq, alignment_min=0.3, tonality_min=0.8, piano_max=0.7, notes_bandwidth_min=3, notes_density_max=50, notes_density_min=2.5, total_notes_max=20000, total_notes_min=256, note_window_size=16):
+    def check_quality(self, midi_seq, alignment_min=0.3, tonality_min=0.8, piano_max=0.7, notes_bandwidth_min=3,
+                      notes_density_max=50, notes_density_min=2.5, total_notes_max=20000, total_notes_min=256,
+                      note_window_size=16):
         total_notes = 0
         channels = []
         time_hist = [0] * 16
@@ -980,13 +984,13 @@ class MIDITokenizerV2:
             tonality_list.append(sum(key_hist[:7]) / len(notes))
             notes_density_list.append(len(notes) / note_window_size)
         tonality_list = sorted(tonality_list)
-        tonality = sum(tonality_list)/len(tonality_list)
-        notes_bandwidth = sum(notes_bandwidth_list)/len(notes_bandwidth_list) if notes_bandwidth_list else 0
+        tonality = sum(tonality_list) / len(tonality_list)
+        notes_bandwidth = sum(notes_bandwidth_list) / len(notes_bandwidth_list) if notes_bandwidth_list else 0
         notes_density = max(notes_density_list) if notes_density_list else 0
         piano_ratio = len(piano_channels) / len(channels)
-        if len(channels) <=3:  # ignore piano threshold if it is a piano solo midi
+        if len(channels) <= 3:  # ignore piano threshold if it is a piano solo midi
             piano_max = 1
-        if alignment < alignment_min: # check weather the notes align to the bars (because some midi files are recorded)
+        if alignment < alignment_min:  # check weather the notes align to the bars (because some midi files are recorded)
             reasons.append("alignment")
         if tonality < tonality_min:  # check whether the music is tonal
             reasons.append("tonality")
@@ -994,9 +998,10 @@ class MIDITokenizerV2:
             reasons.append("bandwidth")
         if not notes_density_min < notes_density < notes_density_max:
             reasons.append("density")
-        if piano_ratio > piano_max: # check whether most instruments is piano (because some midi files don't have instruments assigned correctly)
+        if piano_ratio > piano_max:  # check whether most instruments is piano (because some midi files don't have instruments assigned correctly)
             reasons.append("piano")
         return not reasons, reasons
+
 
 class MIDITokenizer:
     def __new__(cls, version="v2"):

@@ -12,6 +12,7 @@ from midi_tokenizer import MIDITokenizerV1, MIDITokenizerV2, MIDITokenizer
 
 config_name_list = ["tv1-medium", "tv2-medium"]
 
+
 class MIDIModelConfig:
     def __init__(self, tokenizer: Union[MIDITokenizerV1, MIDITokenizerV2],
                  net_config: LlamaConfig, net_token_config: LlamaConfig):
@@ -20,18 +21,17 @@ class MIDIModelConfig:
         self.net_token_config = net_token_config
         self.n_embd = net_token_config.hidden_size
 
-
     @staticmethod
     def get_config(tokenizer_ver="v2", n_layer=12, n_head=16, n_embd=1024, n_inner=4096):
         tokenizer = MIDITokenizer(tokenizer_ver)
         net_config = LlamaConfig(vocab_size=tokenizer.vocab_size,
-                               hidden_size=n_embd, num_attention_heads=n_head,
-                               num_hidden_layers=n_layer, intermediate_size=n_inner,
-                               pad_token_id=tokenizer.pad_id, max_position_embeddings=4096)
+                                 hidden_size=n_embd, num_attention_heads=n_head,
+                                 num_hidden_layers=n_layer, intermediate_size=n_inner,
+                                 pad_token_id=tokenizer.pad_id, max_position_embeddings=4096)
         net_token_config = LlamaConfig(vocab_size=tokenizer.vocab_size,
-                                        hidden_size=n_embd, num_attention_heads=n_head // 4,
-                                        num_hidden_layers=n_layer // 4, intermediate_size=n_inner // 4,
-                                        pad_token_id=tokenizer.pad_id, max_position_embeddings=4096)
+                                       hidden_size=n_embd, num_attention_heads=n_head // 4,
+                                       num_hidden_layers=n_layer // 4, intermediate_size=n_inner // 4,
+                                       pad_token_id=tokenizer.pad_id, max_position_embeddings=4096)
         return MIDIModelConfig(tokenizer, net_config, net_token_config)
 
     @staticmethod
