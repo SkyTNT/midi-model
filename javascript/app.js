@@ -183,7 +183,12 @@ class MidiVisualizer extends HTMLElement{
                     channel = midiEvent[4]
                     pitch = midiEvent[5]
                     velocity = midiEvent[6]
-                }else if (this.version === "v2")
+                }else if (this.version === "v2"){
+                    channel = midiEvent[3]
+                    pitch = midiEvent[4]
+                    velocity = midiEvent[5]
+                    duration = midiEvent[6]
+                }
 
                 let x = (t/this.timePreBeat)*this.config.beatWidth
                 let y = (127 - pitch)*this.config.noteHeight
