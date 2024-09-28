@@ -117,9 +117,11 @@ class MidiVisualizer extends HTMLElement{
         this.totalTimeMs = 0
         this.playTime = 0
         this.playTimeMs = 0
+        this.lastUpdateTime = 0
         this.colorMap = new Map();
         this.playing = false;
         this.timer = null;
+        this.version = "v2"
         this.init();
     }
 
@@ -157,6 +159,7 @@ class MidiVisualizer extends HTMLElement{
         this.setPlayTime(0);
         this.totalTimeMs = 0;
         this.playTimeMs = 0
+        this.lastUpdateTime = 0
         this.svgWidth = 0
         this.svg.innerHTML = ''
         this.svg.style.width = `${this.svgWidth}px`;
@@ -171,10 +174,17 @@ class MidiVisualizer extends HTMLElement{
             midiEvent = [midiEvent[0], t].concat(midiEvent.slice(3))
             if(midiEvent[0] === "note"){
                 let track = midiEvent[2]
-                let duration = midiEvent[3]
-                let channel = midiEvent[4]
-                let pitch = midiEvent[5]
-                let velocity = midiEvent[6]
+                let duration = 0
+                let channel = 0
+                let pitch = 0
+                let velocity = 0
+                if(this.version === "v1"){
+                    duration = midiEvent[3]
+                    channel = midiEvent[4]
+                    pitch = midiEvent[5]
+                    velocity = midiEvent[6]
+                }else if (this.version === "v2")
+
                 let x = (t/this.timePreBeat)*this.config.beatWidth
                 let y = (127 - pitch)*this.config.noteHeight
                 let w = (duration/this.timePreBeat)*this.config.beatWidth
@@ -252,8 +262,8 @@ class MidiVisualizer extends HTMLElement{
         this.timeLine.setAttribute('y2', `${this.config.noteHeight*128}`);
 
         this.wrapper.scrollTo(Math.max(0, x - this.wrapper.offsetWidth/2), 0)
-
-        if(this.playing){
+        let dt = Date.now() - this.lastUpdateTime; // limit the update rate of ActiveNotes
+        if(this.playing && dt > 50){
             let activeNotes = []
             this.removeActiveNotes(this.activeNotes)
             this.midiEvents.forEach((midiEvent)=>{
@@ -267,7 +277,9 @@ class MidiVisualizer extends HTMLElement{
                 }
             })
             this.addActiveNotes(activeNotes)
+            this.lastUpdateTime = Date.now();
         }
+
     }
 
     setPlayTimeMs(ms){
@@ -424,6 +436,10 @@ customElements.define('midi-visualizer', MidiVisualizer);
         switch (msg.name) {
             case "visualizer_clear":
                 midi_visualizer.clearMidiEvents(false);
+                midi_visualizer.version = msg.data
+                createProgressBar(midi_visualizer_container_inited)
+                break;
+            case "visualizer_continue":
                 createProgressBar(midi_visualizer_container_inited)
                 break;
             case "visualizer_append":

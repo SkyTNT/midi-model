@@ -1,6 +1,6 @@
 import random
 
-import PIL
+import PIL.Image
 import numpy as np
 
 
@@ -534,18 +534,43 @@ class MIDITokenizerV2:
         return tempo
 
     @staticmethod
-    def sf2note(sf):
-        # sf in key_signature to note_number
-        # note_number represents the sequence from C note to B note (12 in total)
+    def sf2key(sf):
+        # sf in key_signature to key.
+        # key represents the sequence from C note to B note (12 in total)
         return (sf * 7) % 12
 
     @staticmethod
-    def note2sf(n, mi):
-        # note_number to sf
-        sf = (n * 7) % 12
+    def key2sf(k, mi):
+        # key to sf
+        sf = (k * 7) % 12
         if sf > 6 or (mi == 1 and sf >= 5):
             sf -= 12
         return sf
+
+    @staticmethod
+    def detect_key_signature(key_hist, threshold=0.7):
+        if len(key_hist) != 12:
+            return None
+        p = sum(sorted(key_hist, reverse=True)) / sum(key_hist)
+        if p < threshold:
+            return None
+        keys = [x[1] for x in sorted(zip(key_hist, range(len(key_hist))), reverse=True, key=lambda x: x[0])[:7]]
+        keys = sorted(keys)
+        semitones = []
+        for i in range(len(keys)):
+            dis = keys[i] - keys[i - 1]
+            if dis == 1 or dis == -11:
+                semitones.append(keys[i])
+        if len(semitones) != 2:
+            return None
+        semitones_dis = semitones[1] - semitones[0]
+        if semitones_dis == 5:
+            root_key = semitones[0]
+        elif semitones_dis == 7:
+            root_key = semitones[1]
+        else:
+            return None
+        return root_key
 
     def tokenize(self, midi_score, add_bos_eos=True, cc_eps=4, tempo_eps=4,
                  remap_track_channel=None, add_default_instr=None, remove_empty_channels=None):
@@ -564,11 +589,16 @@ class MIDITokenizerV2:
         patch_channels = []
         empty_channels = [True] * 16
         channel_note_tracks = {i: list() for i in range(16)}
+        note_key_hist = [0]*12
+        key_sig_num = 0
+        track_to_channels = {}
         for track_idx, track in enumerate(midi_score[1:129]):
             last_notes = {}
             patch_dict = {}
             control_dict = {}
             last_bpm = 0
+            track_channels = []
+            track_to_channels.setdefault(track_idx, track_channels)
             for event in track:
                 if event[0] not in self.events:
                     continue
@@ -587,6 +617,10 @@ class MIDITokenizerV2:
                     note_tracks = channel_note_tracks[c]
                     if track_idx not in note_tracks:
                         note_tracks.append(track_idx)
+                    if c != 9:
+                        note_key_hist[p%12] += 1
+                    if c not in track_channels:
+                        track_channels.append(c)
                 elif name == "patch_change":
                     c, p = event[2:]
                     if not (0 <= c <= 15):
@@ -627,6 +661,7 @@ class MIDITokenizerV2:
                     sf, mi = event[2:]
                     if not (-7 <= sf <= 7 and 0 <= mi <= 1):  # invalid
                         continue
+                    key_sig_num += 1
                     sf += 7
                     new_event += [sf, mi]
 
@@ -703,10 +738,17 @@ class MIDITokenizerV2:
                     c = event[4]
                     event[4] = channels_map[c]  # channel
                     event[3] = track_idx_map[c][track_idx]  # track
-                    track_idx_dict.setdefault(event[4], event[3]) 
+                    track_idx_dict.setdefault(event[4], event[3])
                     # setdefault, so the track_idx is first of the channel
-                elif name in ["set_tempo", "time_signature", "key_signature"]:
+                elif name in ["set_tempo", "time_signature"]:
                     event[3] = 0  # set track 0 for meta events
+                elif name == "key_signature":
+                    new_track_idx = 0
+                    for tr_map in track_idx_map.values():
+                        if track_idx in tr_map:
+                            new_track_idx = tr_map[track_idx]
+                            break
+                    event[3] = new_track_idx
                 elif name == "control_change" or name == "patch_change":
                     c = event[4]
                     event[4] = channels_map[c]  # channel
@@ -719,11 +761,32 @@ class MIDITokenizerV2:
                     event[3] = new_track_idx
                     if name == "patch_change" and event[4] not in patch_channels:
                         patch_channels.append(event[4])
+            track_to_channels ={}
+            for c, tr_map in track_idx_map.items():
+                if c not in channels_map:
+                    continue
+                c = channels_map[c]
+                for _, track_idx  in tr_map.items():
+                    track_to_channels.setdefault(track_idx, [])
+                    cs = track_to_channels[track_idx]
+                    if c not in cs:
+                        cs.append(c)
 
         if add_default_instr:
             for c in channels:
                 if c not in patch_channels and c in track_idx_dict:
                     event_list.append(["patch_change", 0, 0, track_idx_dict[c], c, 0])
+
+        if key_sig_num == 0:
+            # detect key signature.
+            root_key = self.detect_key_signature(note_key_hist)
+            if root_key is not None:
+                sf = self.key2sf(root_key, 0)
+                for tr, cs in track_to_channels.items():
+                    if remap_track_channel and tr == 0:
+                        continue
+                    event_list.append(["key_signature", 0, 0, tr, 0 if (len(cs) == 1 and cs[0] == 9) else sf, 0])
+
         events_name_order = ["time_signature", "key_signature", "set_tempo", "patch_change", "control_change", "note"]
         events_name_order = {name: i for i, name in enumerate(events_name_order)}
         events_order = lambda e: e[1:4] + [events_name_order[e[0]]]
@@ -884,6 +947,8 @@ class MIDITokenizerV2:
         track_shift = random.randint(0, max_track_shift)
         channel_shift = random.randint(0, max_channel_shift)
         midi_seq_new = []
+        key_signature_tokens = []
+        track_to_channels = {}
         for tokens in midi_seq:
             tokens_new = [*tokens]
             if tokens[0] in self.id_events:
@@ -906,6 +971,7 @@ class MIDITokenizerV2:
                         tokens_new[1 + i] = self.parameter_ids[pn][c]
 
                 if name == "note":
+                    tr = tokens[3] - self.parameter_ids["track"][0]
                     c = tokens[4] - self.parameter_ids["channel"][0]
                     p = tokens[5] - self.parameter_ids["pitch"][0]
                     v = tokens[6] - self.parameter_ids["velocity"][0]
@@ -917,6 +983,10 @@ class MIDITokenizerV2:
                     v = max(1, min(127, v))
                     tokens_new[5] = self.parameter_ids["pitch"][p]
                     tokens_new[6] = self.parameter_ids["velocity"][v]
+                    track_to_channels.setdefault(tr, [])
+                    cs = track_to_channels[tr]
+                    if c not in cs:
+                        cs.append(c)
                 elif name == "control_change":
                     cc = tokens[5] - self.parameter_ids["controller"][0]
                     val = tokens[6] - self.parameter_ids["value"][0]
@@ -933,13 +1003,20 @@ class MIDITokenizerV2:
                     sf = tokens[4] - self.parameter_ids["sf"][0]
                     mi = tokens[5] - self.parameter_ids["mi"][0]
                     sf -= 7
-                    n = self.sf2note(sf)
-                    n = (n + pitch_shift) % 12
-                    sf = self.note2sf(n, mi)
+                    k = self.sf2key(sf)
+                    k = (k + pitch_shift) % 12
+                    sf = self.key2sf(k, mi)
                     sf += 7
                     tokens_new[4] = self.parameter_ids["sf"][sf]
                     tokens_new[5] = self.parameter_ids["mi"][mi]
+                    key_signature_tokens.append(tokens_new)
             midi_seq_new.append(tokens_new)
+        for tokens in  key_signature_tokens:
+            tr = tokens[3] - self.parameter_ids["track"][0]
+            if tr in track_to_channels:
+                cs = track_to_channels[tr]
+                if len(cs) == 1 and cs[0] == 9:
+                    tokens[4] = self.parameter_ids["sf"][7] # sf=0
         return midi_seq_new
 
     def check_quality(self, midi_seq, alignment_min=0.3, tonality_min=0.8, piano_max=0.7, notes_bandwidth_min=3,

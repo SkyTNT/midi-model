@@ -139,13 +139,13 @@ def run(tab, instruments, drum_kit, bpm, mid, midi_events,
     max_len += len(mid)
 
     events = [tokenizer.tokens2event(tokens) for tokens in mid_seq]
-    init_msgs = [create_msg("visualizer_clear", None), create_msg("visualizer_append", events)]
-    t = time.time()
+    init_msgs = [create_msg("visualizer_clear", tokenizer.version), create_msg("visualizer_append", events)]
     yield mid_seq, None, None, seed, send_msgs(init_msgs)
     midi_generator = generate(mid, max_len=max_len, temp=temp, top_p=top_p, top_k=top_k,
                          disable_patch_change=disable_patch_change, disable_control_change=not allow_cc,
                          disable_channels=disable_channels, amp=amp, generator=generator)
     events = []
+    t = time.time()
     for i, token_seq in enumerate(midi_generator):
         token_seq = token_seq.tolist()
         mid_seq.append(token_seq)
@@ -157,10 +157,40 @@ def run(tab, instruments, drum_kit, bpm, mid, midi_events,
             events = []
 
     mid = tokenizer.detokenize(mid_seq)
-    with open(f"output.mid", 'wb') as f:
-        f.write(MIDI.score2midi(mid))
     audio = synthesis(MIDI.score2opus(mid), soundfont_path)
     events = [tokenizer.tokens2event(tokens) for tokens in mid_seq]
+    with open(f"output.mid", 'wb') as f:
+        f.write(MIDI.score2midi(mid))
+    yield mid_seq, "output.mid", (44100, audio), seed, send_msgs([create_msg("visualizer_end", events)])
+
+def continue_run(mid_seq, seed, seed_rand, gen_events, temp, top_p, top_k, allow_cc, amp):
+    if seed_rand:
+        seed = np.random.randint(0, MAX_SEED)
+    generator = torch.Generator(opt.device).manual_seed(seed)
+    mid = np.asarray(mid_seq, dtype=np.int64)
+    gen_events = int(gen_events)
+    max_len = gen_events + len(mid)
+    init_msgs = [create_msg("visualizer_continue", None)]
+    yield mid_seq, None, None, seed, send_msgs(init_msgs)
+    midi_generator = generate(mid, max_len=max_len, temp=temp, top_p=top_p, top_k=top_k,
+                              disable_control_change=not allow_cc, amp=amp, generator=generator)
+    events = []
+    t = time.time()
+    for i, token_seq in enumerate(midi_generator):
+        token_seq = token_seq.tolist()
+        mid_seq.append(token_seq)
+        events.append(tokenizer.tokens2event(token_seq))
+        ct = time.time()
+        if ct - t > 0.2:
+            yield mid_seq, None, None, seed, send_msgs([create_msg("visualizer_append", events), create_msg("progress", [i + 1, gen_events])])
+            t = ct
+            events = []
+
+    mid = tokenizer.detokenize(mid_seq)
+    audio = synthesis(MIDI.score2opus(mid), soundfont_path)
+    events = [tokenizer.tokens2event(tokens) for tokens in mid_seq]
+    with open(f"output.mid", 'wb') as f:
+        f.write(MIDI.score2midi(mid))
     yield mid_seq, "output.mid", (44100, audio), seed, send_msgs([create_msg("visualizer_end", events)])
 
 
@@ -168,10 +198,10 @@ def cancel_run(mid_seq):
     if mid_seq is None:
         return None, None, []
     mid = tokenizer.detokenize(mid_seq)
-    with open(f"output.mid", 'wb') as f:
-        f.write(MIDI.score2midi(mid))
     audio = synthesis(MIDI.score2opus(mid), soundfont_path)
     events = [tokenizer.tokens2event(tokens) for tokens in mid_seq]
+    with open(f"output.mid", 'wb') as f:
+        f.write(MIDI.score2midi(mid))
     return "output.mid", (44100, audio), send_msgs([create_msg("visualizer_end", events)])
 
 
@@ -280,9 +310,12 @@ if __name__ == "__main__":
                 input_add_default_instr = gr.Checkbox(
                     label="add a default instrument to channels that don't have an instrument", value=True)
                 input_remove_empty_channels = gr.Checkbox(label="remove channels without notes", value=False)
+            with gr.TabItem("last output prompt") as tab3:
+                gr.Markdown("Continue generating on the last output. Just click the generate button")
 
         tab1.select(lambda: 0, None, tab_select, queue=False)
         tab2.select(lambda: 1, None, tab_select, queue=False)
+        tab3.select(lambda: 2, None, tab_select, queue=False)
         input_seed = gr.Slider(label="seed", minimum=0, maximum=2 ** 31 - 1,
                                step=1, value=0)
         input_seed_rand = gr.Checkbox(label="random seed", value=True)
