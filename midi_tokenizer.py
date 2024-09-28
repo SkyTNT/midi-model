@@ -551,7 +551,7 @@ class MIDITokenizerV2:
     def detect_key_signature(key_hist, threshold=0.7):
         if len(key_hist) != 12:
             return None
-        p = sum(sorted(key_hist[:7], reverse=True)) / sum(key_hist)
+        p = sum(sorted(key_hist, reverse=True)[:7]) / sum(key_hist)
         if p < threshold:
             return None
         keys = [x[1] for x in sorted(zip(key_hist, range(len(key_hist))), reverse=True, key=lambda x: x[0])[:7]]
