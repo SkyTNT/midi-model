@@ -731,6 +731,7 @@ class MIDITokenizerV2:
 
             empty_channels = [channels_map[c] for c in empty_channels]
             track_idx_dict = {}
+            key_signature_to_add = []
             for event in event_list:
                 name = event[0]
                 track_idx = event[3]
@@ -743,12 +744,23 @@ class MIDITokenizerV2:
                 elif name in ["set_tempo", "time_signature"]:
                     event[3] = 0  # set track 0 for meta events
                 elif name == "key_signature":
-                    new_track_idx = 0
-                    for tr_map in track_idx_map.values():
+                    new_channel_track_idxs = []
+                    for c, tr_map in track_idx_map.items():
                         if track_idx in tr_map:
                             new_track_idx = tr_map[track_idx]
-                            break
-                    event[3] = new_track_idx
+                            new_channel_track_idx = (c, new_track_idx)
+                            if new_channel_track_idx not in new_channel_track_idxs:
+                                new_channel_track_idxs.append(new_channel_track_idx)
+                    c, nt = new_channel_track_idxs[0]
+                    event[3] = nt
+                    if c == 9:
+                        event[4] = 7 # sf=0
+                    for c, nt in new_channel_track_idxs[1:]:
+                        new_event = [*event]
+                        new_event[3] = nt
+                        if c == 9:
+                            new_event[4] = 7  # sf=0
+                        key_signature_to_add.append(new_event)
                 elif name == "control_change" or name == "patch_change":
                     c = event[4]
                     event[4] = channels_map[c]  # channel
@@ -761,6 +773,7 @@ class MIDITokenizerV2:
                     event[3] = new_track_idx
                     if name == "patch_change" and event[4] not in patch_channels:
                         patch_channels.append(event[4])
+            event_list += key_signature_to_add
             track_to_channels ={}
             for c, tr_map in track_idx_map.items():
                 if c not in channels_map:
@@ -782,10 +795,11 @@ class MIDITokenizerV2:
             root_key = self.detect_key_signature(note_key_hist)
             if root_key is not None:
                 sf = self.key2sf(root_key, 0)
+                # print("detect_key_signature",sf)
                 for tr, cs in track_to_channels.items():
                     if remap_track_channel and tr == 0:
                         continue
-                    event_list.append(["key_signature", 0, 0, tr, 0 if (len(cs) == 1 and cs[0] == 9) else sf, 0])
+                    event_list.append(["key_signature", 0, 0, tr, (0 if (len(cs) == 1 and cs[0] == 9) else sf) + 7, 0])
 
         events_name_order = ["time_signature", "key_signature", "set_tempo", "patch_change", "control_change", "note"]
         events_name_order = {name: i for i, name in enumerate(events_name_order)}
