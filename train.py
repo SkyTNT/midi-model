@@ -305,11 +305,15 @@ if __name__ == '__main__':
         choices=["cpu", "gpu", "tpu", "ipu", "hpu", "auto"],
         help="accelerator",
     )
+    parser.add_argument(
+        "--precision",
+        type=str,
+        default="bf16-true",
+        choices=["16-true", "16-mixed", "bf16-true", "bf16-mixed", "32-true", "64-true", "64", "32", "16", "bf16"],
+        help="precision",
+    )
     parser.add_argument("--devices", type=int, default=-1, help="devices num")
     parser.add_argument("--nodes", type=int, default=1, help="nodes num")
-    parser.add_argument(
-        "--fp32", action="store_true", default=False, help="disable mix precision"
-    )
     parser.add_argument(
         "--disable-benchmark", action="store_true", default=False, help="disable cudnn benchmark"
     )
@@ -379,10 +383,10 @@ if __name__ == '__main__':
     callbacks = [checkpoint_callback]
 
     trainer = Trainer(
-        precision=32 if opt.fp32 else 16,
+        precision=opt.precision,
         accumulate_grad_batches=opt.acc_grad,
         gradient_clip_val=opt.grad_clip,
-        accelerator="gpu",
+        accelerator=opt.accelerator,
         devices=opt.devices,
         num_nodes=opt.nodes,
         max_steps=opt.max_step,
