@@ -10,6 +10,7 @@ import torch
 
 import torch.nn.functional as F
 import tqdm
+from torch import dtype
 
 import MIDI
 from midi_model import MIDIModel, config_name_list, MIDIModelConfig
@@ -19,9 +20,10 @@ from huggingface_hub import hf_hub_download
 
 MAX_SEED = np.iinfo(np.int32).max
 
+
 @torch.inference_mode()
 def generate(prompt=None, max_len=512, temp=1.0, top_p=0.98, top_k=20,
-             disable_patch_change=False, disable_control_change=False, disable_channels=None, amp=True, generator=None):
+             disable_patch_change=False, disable_control_change=False, disable_channels=None, generator=None):
     if disable_channels is not None:
         disable_channels = [tokenizer.parameter_ids["channel"][c] for c in disable_channels]
     else:
@@ -39,7 +41,7 @@ def generate(prompt=None, max_len=512, temp=1.0, top_p=0.98, top_k=20,
     input_tensor = input_tensor.unsqueeze(0)
     cur_len = input_tensor.shape[1]
     bar = tqdm.tqdm(desc="generating", total=max_len - cur_len)
-    with bar, torch.cuda.amp.autocast(enabled=amp):
+    with bar:
         while cur_len < max_len:
             end = False
             hidden = model.forward(input_tensor)[0, -1].unsqueeze(0)
@@ -94,10 +96,26 @@ def send_msgs(msgs):
     return json.dumps(msgs)
 
 
-def run(tab, mid_seq, instruments, drum_kit, bpm, mid, midi_events,
+def run(tab, mid_seq, instruments, drum_kit, bpm, time_sig, key_sig, mid, midi_events,
         reduce_cc_st, remap_track_channel, add_default_instr, remove_empty_channels, seed, seed_rand,
-        gen_events, temp, top_p, top_k, allow_cc, amp):
+        gen_events, temp, top_p, top_k, allow_cc):
     bpm = int(bpm)
+    if time_sig == "auto":
+        time_sig = None
+        time_sig_nn = 4
+        time_sig_dd = 2
+    else:
+        time_sig_nn, time_sig_dd = time_sig.split('/')
+        time_sig_nn = int(time_sig_nn)
+        time_sig_dd = {2: 1, 4: 2, 8: 3}[int(time_sig_dd)]
+    if key_sig == 0:
+        key_sig = None
+        key_sig_sf = 0
+        key_sig_mi = 0
+    else:
+        key_sig = (key_sig - 1)
+        key_sig_sf = key_sig // 2 - 7
+        key_sig_mi = key_sig % 2
     gen_events = int(gen_events)
     max_len = gen_events
     if seed_rand:
@@ -108,8 +126,13 @@ def run(tab, mid_seq, instruments, drum_kit, bpm, mid, midi_events,
     if tab == 0:
         i = 0
         mid = [[tokenizer.bos_id] + [tokenizer.pad_id] * (tokenizer.max_token_seq - 1)]
+        if tokenizer.version == "v2":
+            if time_sig is not None:
+                mid.append(tokenizer.event2tokens(["time_signature", 0, 0, 0, time_sig_nn - 1, time_sig_dd - 1]))
+            if key_sig is not None:
+                mid.append(tokenizer.event2tokens(["key_signature", 0, 0, 0, key_sig_sf + 7, key_sig_mi]))
         if bpm != 0:
-            mid.append(tokenizer.event2tokens(["set_tempo",0,0,0, bpm]))
+            mid.append(tokenizer.event2tokens(["set_tempo", 0, 0, 0, bpm]))
         patches = {}
         if instruments is None:
             instruments = []
@@ -119,7 +142,7 @@ def run(tab, mid_seq, instruments, drum_kit, bpm, mid, midi_events,
         if drum_kit != "None":
             patches[9] = drum_kits2number[drum_kit]
         for i, (c, p) in enumerate(patches.items()):
-            mid.append(tokenizer.event2tokens(["patch_change", 0, 0, i, c, p]))
+            mid.append(tokenizer.event2tokens(["patch_change", 0, 0, i + 1, c, p]))
         mid_seq = mid
         mid = np.asarray(mid, dtype=np.int64)
         if len(instruments) > 0:
@@ -139,7 +162,7 @@ def run(tab, mid_seq, instruments, drum_kit, bpm, mid, midi_events,
     elif tab == 2 and mid_seq is not None:
         mid = np.asarray(mid_seq, dtype=np.int64)
     else:
-        mid_seq=[]
+        mid_seq = []
         mid = None
 
     if mid is not None:
@@ -153,8 +176,8 @@ def run(tab, mid_seq, instruments, drum_kit, bpm, mid, midi_events,
                      create_msg("visualizer_append", events)]
     yield mid_seq, None, None, seed, send_msgs(init_msgs)
     midi_generator = generate(mid, max_len=max_len, temp=temp, top_p=top_p, top_k=top_k,
-                         disable_patch_change=disable_patch_change, disable_control_change=not allow_cc,
-                         disable_channels=disable_channels, amp=amp, generator=generator)
+                              disable_patch_change=disable_patch_change, disable_control_change=not allow_cc,
+                              disable_channels=disable_channels, generator=generator)
     events = []
     t = time.time()
     for i, token_seq in enumerate(midi_generator):
@@ -163,7 +186,8 @@ def run(tab, mid_seq, instruments, drum_kit, bpm, mid, midi_events,
         events.append(tokenizer.tokens2event(token_seq))
         ct = time.time()
         if ct - t > 0.2:
-            yield mid_seq, None, None, seed, send_msgs([create_msg("visualizer_append", events), create_msg("progress", [i + 1, gen_events])])
+            yield mid_seq, None, None, seed, send_msgs(
+                [create_msg("visualizer_append", events), create_msg("progress", [i + 1, gen_events])])
             t = ct
             events = []
 
@@ -186,14 +210,14 @@ def cancel_run(mid_seq):
     return "output.mid", (44100, audio), send_msgs([create_msg("visualizer_end", events)])
 
 
-def load_model(path,model_config):
+def load_model(path, model_config):
     global model, tokenizer
-    model = MIDIModel(config=MIDIModelConfig.from_name(model_config)).to(opt.device)
+    model = MIDIModel(config=MIDIModelConfig.from_name(model_config))
     tokenizer = model.tokenizer
     ckpt = torch.load(path, map_location="cpu")
     state_dict = ckpt.get("state_dict", ckpt)
     model.load_state_dict(state_dict, strict=False)
-    model.eval()
+    model.to(opt.device, dtype=torch.bfloat16 if opt.device == "cuda" else torch.float32).eval()
     return "success"
 
 
@@ -224,6 +248,8 @@ number2drum_kits = {-1: "None", 0: "Standard", 8: "Room", 16: "Power", 24: "Elec
                     40: "Blush", 48: "Orchestra"}
 patch2number = {v: k for k, v in MIDI.Number2patch.items()}
 drum_kits2number = {v: k for k, v in number2drum_kits.items()}
+key_signatures = ['C♭', 'A♭m', 'G♭', 'E♭m', 'D♭', 'B♭m', 'A♭', 'Fm', 'E♭', 'Cm', 'B♭', 'Gm', 'F', 'Dm',
+                  'C', 'Am', 'G', 'Em', 'D', 'Bm', 'A', 'F♯m', 'E', 'C♯m', 'B', 'G♯m', 'F♯', 'D♯m', 'C♯', 'A♯m']
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -258,7 +284,7 @@ if __name__ == "__main__":
             )
         tab_select = gr.State(value=0)
         with gr.Tabs():
-            with gr.TabItem("instrument prompt") as tab1:
+            with gr.TabItem("custom prompt") as tab1:
                 input_instruments = gr.Dropdown(label="🪗instruments (auto if empty)", choices=list(patch2number.keys()),
                                                 multiselect=True, max_choices=15, type="value")
                 input_drum_kit = gr.Dropdown(label="🥁drum kit", choices=list(drum_kits2number.keys()), type="value",
@@ -266,6 +292,16 @@ if __name__ == "__main__":
                 input_bpm = gr.Slider(label="BPM (beats per minute, auto if 0)", minimum=0, maximum=255,
                                       step=1,
                                       value=0)
+                input_time_sig = gr.Dropdown(label="time signature (only for tv2 models)",
+                                             value="auto",
+                                             choices=["auto", "4/4", "2/4", "3/4", "6/4", "7/4",
+                                                      "2/2", "3/2", "4/2", "3/8", "5/8", "6/8", "7/8", "9/8", "12/8"]
+                                             )
+                input_key_sig = gr.Dropdown(label="key signature (only for tv2 models)",
+                                            value="auto",
+                                            choices=["auto"] + key_signatures,
+                                            type="index"
+                                            )
                 example1 = gr.Examples([
                     [[], "None"],
                     [["Acoustic Grand"], "None"],
@@ -307,7 +343,6 @@ if __name__ == "__main__":
             input_top_p = gr.Slider(label="top p", minimum=0.1, maximum=1, step=0.01, value=0.98)
             input_top_k = gr.Slider(label="top k", minimum=1, maximum=128, step=1, value=10)
             input_allow_cc = gr.Checkbox(label="allow midi cc event", value=True)
-            input_amp = gr.Checkbox(label="enable amp", value=True)
             example3 = gr.Examples([[1, 0.98, 20], [1, 0.98, 12]], [input_temp, input_top_p, input_top_k])
         run_btn = gr.Button("generate", variant="primary")
         stop_btn = gr.Button("stop and output")
@@ -316,10 +351,10 @@ if __name__ == "__main__":
         output_audio = gr.Audio(label="output audio", format="mp3", elem_id="midi_audio")
         output_midi = gr.File(label="output midi", file_types=[".mid"])
         run_event = run_btn.click(run, [tab_select, output_midi_seq, input_instruments, input_drum_kit, input_bpm,
-                                        input_midi, input_midi_events, input_reduce_cc_st, input_remap_track_channel,
-                                        input_add_default_instr, input_remove_empty_channels, input_seed,
-                                        input_seed_rand, input_gen_events, input_temp, input_top_p, input_top_k,
-                                        input_allow_cc, input_amp],
+                                        input_time_sig, input_key_sig, input_midi, input_midi_events,
+                                        input_reduce_cc_st, input_remap_track_channel, input_add_default_instr,
+                                        input_remove_empty_channels, input_seed, input_seed_rand, input_gen_events,
+                                        input_temp, input_top_p, input_top_k, input_allow_cc],
                                   [output_midi_seq, output_midi, output_audio, input_seed, js_msg],
                                   concurrency_limit=3)
         stop_btn.click(cancel_run, [output_midi_seq], [output_midi, output_audio, js_msg], cancels=run_event,

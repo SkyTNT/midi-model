@@ -120,10 +120,26 @@ def send_msgs(msgs):
     return json.dumps(msgs)
 
 
-def run(tab, mid_seq, instruments, drum_kit, bpm, mid, midi_events,
+def run(tab, mid_seq, instruments, drum_kit, bpm, time_sig, key_sig, mid, midi_events,
         reduce_cc_st, remap_track_channel, add_default_instr, remove_empty_channels, seed, seed_rand,
         gen_events, temp, top_p, top_k, allow_cc):
     bpm = int(bpm)
+    if time_sig == "auto":
+        time_sig = None
+        time_sig_nn = 4
+        time_sig_dd = 2
+    else:
+        time_sig_nn, time_sig_dd = time_sig.split('/')
+        time_sig_nn = int(time_sig_nn)
+        time_sig_dd = {2: 1, 4: 2, 8: 3}[int(time_sig_dd)]
+    if key_sig == 0:
+        key_sig = None
+        key_sig_sf = 0
+        key_sig_mi = 0
+    else:
+        key_sig = (key_sig - 1)
+        key_sig_sf = key_sig // 2 - 7
+        key_sig_mi = key_sig % 2
     gen_events = int(gen_events)
     max_len = gen_events
     if seed_rand:
@@ -134,8 +150,13 @@ def run(tab, mid_seq, instruments, drum_kit, bpm, mid, midi_events,
     if tab == 0:
         i = 0
         mid = [[tokenizer.bos_id] + [tokenizer.pad_id] * (tokenizer.max_token_seq - 1)]
+        if tokenizer.version == "v2":
+            if time_sig is not None:
+                mid.append(tokenizer.event2tokens(["time_signature", 0, 0, 0, time_sig_nn - 1, time_sig_dd - 1]))
+            if key_sig is not None:
+                mid.append(tokenizer.event2tokens(["key_signature", 0, 0, 0, key_sig_sf + 7, key_sig_mi]))
         if bpm != 0:
-            mid.append(tokenizer.event2tokens(["set_tempo",0,0,0, bpm]))
+            mid.append(tokenizer.event2tokens(["set_tempo", 0, 0, 0, bpm]))
         patches = {}
         if instruments is None:
             instruments = []
@@ -145,7 +166,7 @@ def run(tab, mid_seq, instruments, drum_kit, bpm, mid, midi_events,
         if drum_kit != "None":
             patches[9] = drum_kits2number[drum_kit]
         for i, (c, p) in enumerate(patches.items()):
-            mid.append(tokenizer.event2tokens(["patch_change", 0, 0, i, c, p]))
+            mid.append(tokenizer.event2tokens(["patch_change", 0, 0, i + 1, c, p]))
         mid_seq = mid
         mid = np.asarray(mid, dtype=np.int64)
         if len(instruments) > 0:
@@ -165,7 +186,7 @@ def run(tab, mid_seq, instruments, drum_kit, bpm, mid, midi_events,
     elif tab == 2 and mid_seq is not None:
         mid = np.asarray(mid_seq, dtype=np.int64)
     else:
-        mid_seq=[]
+        mid_seq = []
         mid = None
 
     if mid is not None:
@@ -178,13 +199,12 @@ def run(tab, mid_seq, instruments, drum_kit, bpm, mid, midi_events,
         init_msgs = [create_msg("visualizer_clear", tokenizer.version),
                      create_msg("visualizer_append", events)]
     yield mid_seq, None, None, seed, send_msgs(init_msgs)
-    t = time.time() + 0.2
-    yield mid_seq, None, None, seed, send_msgs(init_msgs)
     model = (model_base, model_token)
     midi_generator = generate(model, mid, max_len=max_len, temp=temp, top_p=top_p, top_k=top_k,
                          disable_patch_change=disable_patch_change, disable_control_change=not allow_cc,
                          disable_channels=disable_channels, generator=generator)
     events = []
+    t = time.time()
     for i, token_seq in enumerate(midi_generator):
         token_seq = token_seq.tolist()
         mid_seq.append(token_seq)
@@ -271,6 +291,8 @@ number2drum_kits = {-1: "None", 0: "Standard", 8: "Room", 16: "Power", 24: "Elec
                     40: "Blush", 48: "Orchestra"}
 patch2number = {v: k for k, v in MIDI.Number2patch.items()}
 drum_kits2number = {v: k for k, v in number2drum_kits.items()}
+key_signatures = ['C♭', 'A♭m', 'G♭', 'E♭m', 'D♭', 'B♭m', 'A♭', 'Fm', 'E♭', 'Cm', 'B♭', 'Gm', 'F', 'Dm',
+                  'C', 'Am', 'G', 'Em', 'D', 'Bm', 'A', 'F♯m', 'E', 'C♯m', 'B', 'G♯m', 'F♯', 'D♯m', 'C♯', 'A♯m']
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -341,6 +363,16 @@ if __name__ == "__main__":
                 input_bpm = gr.Slider(label="BPM (beats per minute, auto if 0)", minimum=0, maximum=255,
                                               step=1,
                                               value=0)
+                input_time_sig = gr.Radio(label="time signature (only for tv2 models)",
+                                             value="auto",
+                                             choices=["auto", "4/4", "2/4", "3/4", "6/4", "7/4",
+                                                      "2/2", "3/2", "4/2", "3/8", "5/8", "6/8", "7/8", "9/8", "12/8"]
+                                             )
+                input_key_sig = gr.Radio(label="key signature (only for tv2 models)",
+                                            value="auto",
+                                            choices=["auto"] + key_signatures,
+                                            type="index"
+                                            )
                 example1 = gr.Examples([
                     [[], "None"],
                     [["Acoustic Grand"], "None"],
@@ -390,10 +422,10 @@ if __name__ == "__main__":
         output_audio = gr.Audio(label="output audio", format="mp3", elem_id="midi_audio")
         output_midi = gr.File(label="output midi", file_types=[".mid"])
         run_event = run_btn.click(run, [tab_select, output_midi_seq, input_instruments, input_drum_kit, input_bpm,
-                                        input_midi, input_midi_events, input_reduce_cc_st, input_remap_track_channel,
-                                        input_add_default_instr, input_remove_empty_channels, input_seed,
-                                        input_seed_rand, input_gen_events, input_temp, input_top_p, input_top_k,
-                                        input_allow_cc],
+                                        input_time_sig, input_key_sig, input_midi, input_midi_events,
+                                        input_reduce_cc_st, input_remap_track_channel, input_add_default_instr,
+                                        input_remove_empty_channels, input_seed, input_seed_rand, input_gen_events,
+                                        input_temp, input_top_p, input_top_k, input_allow_cc],
                                   [output_midi_seq, output_midi, output_audio, input_seed, js_msg],
                                   concurrency_limit=3)
         stop_btn.click(cancel_run, [output_midi_seq], [output_midi, output_audio, js_msg], cancels=run_event, queue=False)
