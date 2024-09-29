@@ -15,7 +15,7 @@ from torch import dtype
 import MIDI
 from midi_model import MIDIModel, config_name_list, MIDIModelConfig
 from midi_tokenizer import MIDITokenizerV1, MIDITokenizerV2
-from midi_synthesizer import synthesis
+from midi_synthesizer import MidiSynthesizer
 from huggingface_hub import hf_hub_download
 
 MAX_SEED = np.iinfo(np.int32).max
@@ -192,7 +192,7 @@ def run(tab, mid_seq, instruments, drum_kit, bpm, time_sig, key_sig, mid, midi_e
             events = []
 
     mid = tokenizer.detokenize(mid_seq)
-    audio = synthesis(MIDI.score2opus(mid), soundfont_path)
+    audio = synthesizer.synthesis(MIDI.score2opus(mid))
     events = [tokenizer.tokens2event(tokens) for tokens in mid_seq]
     with open(f"output.mid", 'wb') as f:
         f.write(MIDI.score2midi(mid))
@@ -203,7 +203,7 @@ def cancel_run(mid_seq):
     if mid_seq is None:
         return None, None, []
     mid = tokenizer.detokenize(mid_seq)
-    audio = synthesis(MIDI.score2opus(mid), soundfont_path)
+    audio = synthesizer.synthesis(MIDI.score2opus(mid))
     events = [tokenizer.tokens2event(tokens) for tokens in mid_seq]
     with open(f"output.mid", 'wb') as f:
         f.write(MIDI.score2midi(mid))
@@ -255,8 +255,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=7860, help="gradio server port")
     parser.add_argument("--device", type=str, default="cuda", help="device to run model")
-    soundfont_path = hf_hub_download(repo_id="skytnt/midi-model", filename="soundfont.sf2")
     opt = parser.parse_args()
+    soundfont_path = hf_hub_download(repo_id="skytnt/midi-model", filename="soundfont.sf2")
+    synthesizer = MidiSynthesizer(soundfont_path)
     tokenizer: Union[MIDITokenizerV1, MIDITokenizerV2, None] = None
     model: Optional[MIDIModel] = None
 

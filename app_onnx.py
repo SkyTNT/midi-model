@@ -12,7 +12,7 @@ import requests
 import tqdm
 
 import MIDI
-from midi_synthesizer import synthesis
+from midi_synthesizer import MidiSynthesizer
 from midi_tokenizer import MIDITokenizer
 
 MAX_SEED = np.iinfo(np.int32).max
@@ -218,7 +218,7 @@ def run(tab, mid_seq, instruments, drum_kit, bpm, time_sig, key_sig, mid, midi_e
     mid = tokenizer.detokenize(mid_seq)
     with open(f"output.mid", 'wb') as f:
         f.write(MIDI.score2midi(mid))
-    audio = synthesis(MIDI.score2opus(mid), soundfont_path)
+    audio = synthesizer.synthesis(MIDI.score2opus(mid))
     events = [tokenizer.tokens2event(tokens) for tokens in mid_seq]
     yield mid_seq, "output.mid", (44100, audio), seed, send_msgs([create_msg("visualizer_end", events)])
 
@@ -229,7 +229,7 @@ def cancel_run(mid_seq):
     mid = tokenizer.detokenize(mid_seq)
     with open(f"output.mid", 'wb') as f:
         f.write(MIDI.score2midi(mid))
-    audio = synthesis(MIDI.score2opus(mid), soundfont_path)
+    audio = synthesizer.synthesis(MIDI.score2opus(mid))
     events = [tokenizer.tokens2event(tokens) for tokens in mid_seq]
     return "output.mid", (44100, audio), send_msgs([create_msg("visualizer_end", events)])
 
@@ -323,6 +323,7 @@ if __name__ == "__main__":
         input("Failed to download files.\nPress any key to continue...")
         exit(-1)
     soundfont_path = opt.soundfont_path
+    synthesizer = MidiSynthesizer(soundfont_path)
     tokenizer = get_tokenizer(opt.model_config)
     providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
     try:
