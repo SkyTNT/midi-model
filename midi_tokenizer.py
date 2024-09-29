@@ -751,6 +751,9 @@ class MIDITokenizerV2:
                             new_channel_track_idx = (c, new_track_idx)
                             if new_channel_track_idx not in new_channel_track_idxs:
                                 new_channel_track_idxs.append(new_channel_track_idx)
+                    if len(new_channel_track_idxs) == 0:
+                        event[3] = 0
+                        continue
                     c, nt = new_channel_track_idxs[0]
                     event[3] = nt
                     if c == 9:
