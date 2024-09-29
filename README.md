@@ -43,7 +43,7 @@
 ```bibtex
 @misc{skytnt2024midimodel,
   author = {SkyTNT},
-  title = {Midi Model: Midi event transformer for music generation},
+  title = {Midi Model: Midi event transformer for symbolic music generation},
   year = {2024},
   howpublished = {\url{https://github.com/SkyTNT/midi-model}},
 }
