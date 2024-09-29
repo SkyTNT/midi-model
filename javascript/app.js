@@ -104,6 +104,7 @@ class MidiVisualizer extends HTMLElement{
         this.midiEvents = [];
         this.activeNotes = [];
         this.midiTimes = [];
+        this.patches = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
         this.wrapper = null;
         this.svg = null;
         this.timeLine = null;
@@ -145,17 +146,20 @@ class MidiVisualizer extends HTMLElement{
         this.wrapper = wrapper;
         this.svg = svg;
         this.timeLine= timeLine;
+        for(let i = 0; i <= 128 ; i++){
+            this.colorMap.set(i, HSVtoRGB(i / 129, 1, 1))
+        }
+        console.log(this.colorMap)
         this.setPlayTime(0);
     }
 
-    clearMidiEvents(keepColor=false){
+    clearMidiEvents(){
         this.pause()
         this.midiEvents = [];
         this.activeNotes = [];
         this.midiTimes = [];
+        this.patches = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
         this.t1 = 0
-        if (!keepColor)
-            this.colorMap.clear()
         this.setPlayTime(0);
         this.totalTimeMs = 0;
         this.playTimeMs = 0
@@ -201,6 +205,9 @@ class MidiVisualizer extends HTMLElement{
                 midiEvent.push(rect)
                 this.setPlayTime(t);
                 this.wrapper.scrollTo(this.svgWidth - this.wrapper.offsetWidth, 0)
+            }else if(midiEvent[0] === "patch_change"){
+                let channel = midiEvent[3]
+                this.patches[channel] = midiEvent[4]
             }
             this.midiEvents.push(midiEvent);
             this.svg.style.width = `${this.svgWidth}px`;
@@ -209,7 +216,11 @@ class MidiVisualizer extends HTMLElement{
     }
 
     getColor(track, channel){
-        let key = `${track},${channel}`;
+        let key = this.patches[channel];
+        if( channel === 9){
+            // drum
+            key = 128;
+        }
         let color = this.colorMap.get(key);
         if(!!color){
             return color;
