@@ -120,10 +120,9 @@ def send_msgs(msgs):
     return json.dumps(msgs)
 
 
-def run(tab, instruments, drum_kit, bpm, mid, midi_events,
+def run(tab, mid_seq, instruments, drum_kit, bpm, mid, midi_events,
         reduce_cc_st, remap_track_channel, add_default_instr, remove_empty_channels, seed, seed_rand,
         gen_events, temp, top_p, top_k, allow_cc):
-    mid_seq = []
     bpm = int(bpm)
     gen_events = int(gen_events)
     max_len = gen_events
@@ -152,7 +151,7 @@ def run(tab, instruments, drum_kit, bpm, mid, midi_events,
         if len(instruments) > 0:
             disable_patch_change = True
             disable_channels = [i for i in range(16) if i not in patches]
-    elif mid is not None:
+    elif tab == 1 and mid is not None:
         eps = 4 if reduce_cc_st else 0
         mid = tokenizer.tokenize(MIDI.midi2score(mid), cc_eps=eps, tempo_eps=eps,
                                  remap_track_channel=remap_track_channel,
@@ -160,11 +159,25 @@ def run(tab, instruments, drum_kit, bpm, mid, midi_events,
                                  remove_empty_channels=remove_empty_channels)
         mid = np.asarray(mid, dtype=np.int64)
         mid = mid[:int(midi_events)]
+        mid_seq = []
         for token_seq in mid:
             mid_seq.append(token_seq.tolist())
-    max_len += len(mid)
+    elif tab == 2 and mid_seq is not None:
+        mid = np.asarray(mid_seq, dtype=np.int64)
+    else:
+        mid_seq=[]
+        mid = None
+
+    if mid is not None:
+        max_len += len(mid)
+
     events = [tokenizer.tokens2event(tokens) for tokens in mid_seq]
-    init_msgs = [create_msg("visualizer_clear", None), create_msg("visualizer_append", events)]
+    if tab == 2:
+        init_msgs = [create_msg("visualizer_continue", tokenizer.version)]
+    else:
+        init_msgs = [create_msg("visualizer_clear", tokenizer.version),
+                     create_msg("visualizer_append", events)]
+    yield mid_seq, None, None, seed, send_msgs(init_msgs)
     t = time.time() + 0.2
     yield mid_seq, None, None, seed, send_msgs(init_msgs)
     model = (model_base, model_token)
@@ -240,6 +253,19 @@ def load_javascript(dir="javascript"):
 
     gr.routes.templates.TemplateResponse = template_response
 
+def get_tokenizer(config_name):
+    tv, size = config_name.split("-")
+    tv = tv[1:]
+    if tv[-1] == "o":
+        o = True
+        tv = tv[:-1]
+    else:
+        o = False
+    if tv not in ["v1", "v2"]:
+        raise ValueError(f"Unknown tokenizer version {tv}")
+    tokenizer = MIDITokenizer(tv)
+    tokenizer.set_optimise_midi(o)
+    return tokenizer
 
 number2drum_kits = {-1: "None", 0: "Standard", 8: "Room", 16: "Power", 24: "Electric", 25: "TR-808", 32: "Jazz",
                     40: "Blush", 48: "Orchestra"}
@@ -252,16 +278,17 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=-1, help="gradio server port")
     parser.add_argument("--max-gen", type=int, default=4096, help="max")
     parser.add_argument("--soundfont-path", type=str, default="soundfont.sf2", help="soundfont")
+    parser.add_argument("--model-config", type=str, default="tv2o-large", help="model config name")
     parser.add_argument("--model-base-path", type=str, default="model_base.onnx", help="model path")
     parser.add_argument("--model-token-path", type=str, default="model_token.onnx", help="model path")
     parser.add_argument("--soundfont-url", type=str,
                         default="https://huggingface.co/skytnt/midi-model/resolve/main/soundfont.sf2",
                         help="download soundfont to soundfont-path if file not exist")
     parser.add_argument("--model-base-url", type=str,
-                        default="https://huggingface.co/skytnt/midi-model/resolve/main/onnx/model_base.onnx",
+                        default="https://huggingface.co/asigalov61/Music-Llama/resolve/main/onnx/model_base.onnx",
                         help="download model-base to model-base-path if file not exist")
     parser.add_argument("--model-token-url", type=str,
-                        default="https://huggingface.co/skytnt/midi-model/resolve/main/onnx/model_token.onnx",
+                        default="https://huggingface.co/asigalov61/Music-Llama/resolve/main/onnx/model_token.onnx",
                         help="download model-token to model-token-path if file not exist")
     opt = parser.parse_args()
 
@@ -274,7 +301,7 @@ if __name__ == "__main__":
         input("Failed to download files.\nPress any key to continue...")
         exit(-1)
     soundfont_path = opt.soundfont_path
-    tokenizer = MIDITokenizer()
+    tokenizer = get_tokenizer(opt.model_config)
     providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
     try:
         model_base = rt.InferenceSession(opt.model_base_path, providers=providers)
@@ -339,9 +366,12 @@ if __name__ == "__main__":
                 input_add_default_instr = gr.Checkbox(
                     label="add a default instrument to channels that don't have an instrument", value=True)
                 input_remove_empty_channels = gr.Checkbox(label="remove channels without notes", value=False)
+            with gr.TabItem("last output prompt") as tab3:
+                gr.Markdown("Continue generating on the last output. Just click the generate button")
 
         tab1.select(lambda: 0, None, tab_select, queue=False)
         tab2.select(lambda: 1, None, tab_select, queue=False)
+        tab3.select(lambda: 2, None, tab_select, queue=False)
         input_seed = gr.Slider(label="seed", minimum=0, maximum=2 ** 31 - 1,
                                step=1, value=0)
         input_seed_rand = gr.Checkbox(label="random seed", value=True)
@@ -359,7 +389,7 @@ if __name__ == "__main__":
         output_midi_visualizer = gr.HTML(elem_id="midi_visualizer_container")
         output_audio = gr.Audio(label="output audio", format="mp3", elem_id="midi_audio")
         output_midi = gr.File(label="output midi", file_types=[".mid"])
-        run_event = run_btn.click(run, [tab_select, input_instruments, input_drum_kit, input_bpm,
+        run_event = run_btn.click(run, [tab_select, output_midi_seq, input_instruments, input_drum_kit, input_bpm,
                                         input_midi, input_midi_events, input_reduce_cc_st, input_remap_track_channel,
                                         input_add_default_instr, input_remove_empty_channels, input_seed,
                                         input_seed_rand, input_gen_events, input_temp, input_top_p, input_top_k,

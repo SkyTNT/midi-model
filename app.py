@@ -94,10 +94,9 @@ def send_msgs(msgs):
     return json.dumps(msgs)
 
 
-def run(tab, instruments, drum_kit, bpm, mid, midi_events,
+def run(tab, mid_seq, instruments, drum_kit, bpm, mid, midi_events,
         reduce_cc_st, remap_track_channel, add_default_instr, remove_empty_channels, seed, seed_rand,
         gen_events, temp, top_p, top_k, allow_cc, amp):
-    mid_seq = []
     bpm = int(bpm)
     gen_events = int(gen_events)
     max_len = gen_events
@@ -126,7 +125,7 @@ def run(tab, instruments, drum_kit, bpm, mid, midi_events,
         if len(instruments) > 0:
             disable_patch_change = True
             disable_channels = [i for i in range(16) if i not in patches]
-    elif mid is not None:
+    elif tab == 1 and mid is not None:
         eps = 4 if reduce_cc_st else 0
         mid = tokenizer.tokenize(MIDI.midi2score(mid), cc_eps=eps, tempo_eps=eps,
                                  remap_track_channel=remap_track_channel,
@@ -134,46 +133,28 @@ def run(tab, instruments, drum_kit, bpm, mid, midi_events,
                                  remove_empty_channels=remove_empty_channels)
         mid = np.asarray(mid, dtype=np.int64)
         mid = mid[:int(midi_events)]
+        mid_seq = []
         for token_seq in mid:
             mid_seq.append(token_seq.tolist())
-    max_len += len(mid)
+    elif tab == 2 and mid_seq is not None:
+        mid = np.asarray(mid_seq, dtype=np.int64)
+    else:
+        mid_seq=[]
+        mid = None
+
+    if mid is not None:
+        max_len += len(mid)
 
     events = [tokenizer.tokens2event(tokens) for tokens in mid_seq]
-    init_msgs = [create_msg("visualizer_clear", tokenizer.version), create_msg("visualizer_append", events)]
+    if tab == 2:
+        init_msgs = [create_msg("visualizer_continue", tokenizer.version)]
+    else:
+        init_msgs = [create_msg("visualizer_clear", tokenizer.version),
+                     create_msg("visualizer_append", events)]
     yield mid_seq, None, None, seed, send_msgs(init_msgs)
     midi_generator = generate(mid, max_len=max_len, temp=temp, top_p=top_p, top_k=top_k,
                          disable_patch_change=disable_patch_change, disable_control_change=not allow_cc,
                          disable_channels=disable_channels, amp=amp, generator=generator)
-    events = []
-    t = time.time()
-    for i, token_seq in enumerate(midi_generator):
-        token_seq = token_seq.tolist()
-        mid_seq.append(token_seq)
-        events.append(tokenizer.tokens2event(token_seq))
-        ct = time.time()
-        if ct - t > 0.2:
-            yield mid_seq, None, None, seed, send_msgs([create_msg("visualizer_append", events), create_msg("progress", [i + 1, gen_events])])
-            t = ct
-            events = []
-
-    mid = tokenizer.detokenize(mid_seq)
-    audio = synthesis(MIDI.score2opus(mid), soundfont_path)
-    events = [tokenizer.tokens2event(tokens) for tokens in mid_seq]
-    with open(f"output.mid", 'wb') as f:
-        f.write(MIDI.score2midi(mid))
-    yield mid_seq, "output.mid", (44100, audio), seed, send_msgs([create_msg("visualizer_end", events)])
-
-def continue_run(mid_seq, seed, seed_rand, gen_events, temp, top_p, top_k, allow_cc, amp):
-    if seed_rand:
-        seed = np.random.randint(0, MAX_SEED)
-    generator = torch.Generator(opt.device).manual_seed(seed)
-    mid = np.asarray(mid_seq, dtype=np.int64)
-    gen_events = int(gen_events)
-    max_len = gen_events + len(mid)
-    init_msgs = [create_msg("visualizer_continue", None)]
-    yield mid_seq, None, None, seed, send_msgs(init_msgs)
-    midi_generator = generate(mid, max_len=max_len, temp=temp, top_p=top_p, top_k=top_k,
-                              disable_control_change=not allow_cc, amp=amp, generator=generator)
     events = []
     t = time.time()
     for i, token_seq in enumerate(midi_generator):
@@ -334,7 +315,7 @@ if __name__ == "__main__":
         output_midi_visualizer = gr.HTML(elem_id="midi_visualizer_container")
         output_audio = gr.Audio(label="output audio", format="mp3", elem_id="midi_audio")
         output_midi = gr.File(label="output midi", file_types=[".mid"])
-        run_event = run_btn.click(run, [tab_select, input_instruments, input_drum_kit, input_bpm,
+        run_event = run_btn.click(run, [tab_select, output_midi_seq, input_instruments, input_drum_kit, input_bpm,
                                         input_midi, input_midi_events, input_reduce_cc_st, input_remap_track_channel,
                                         input_add_default_instr, input_remove_empty_channels, input_seed,
                                         input_seed_rand, input_gen_events, input_temp, input_top_p, input_top_k,

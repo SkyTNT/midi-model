@@ -274,7 +274,7 @@ class MidiVisualizer extends HTMLElement{
             this.midiEvents.forEach((midiEvent)=>{
                 if(midiEvent[0] === "note"){
                     let time = midiEvent[1]
-                    let duration = midiEvent[3]
+                    let duration = this.version==="v1"? midiEvent[3]:midiEvent[6]
                     let note = midiEvent[midiEvent.length - 1]
                     if(time <=this.playTime && time+duration>= this.playTime){
                         activeNotes.push(note)
@@ -445,6 +445,7 @@ customElements.define('midi-visualizer', MidiVisualizer);
                 createProgressBar(midi_visualizer_container_inited)
                 break;
             case "visualizer_continue":
+                midi_visualizer.version = msg.data
                 createProgressBar(midi_visualizer_container_inited)
                 break;
             case "visualizer_append":
