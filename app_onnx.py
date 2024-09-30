@@ -120,7 +120,7 @@ def send_msgs(msgs):
     return json.dumps(msgs)
 
 
-def run(tab, mid_seq, instruments, drum_kit, bpm, time_sig, key_sig, mid, midi_events,
+def run(tab, mid_seq, continuation_state, instruments, drum_kit, bpm, time_sig, key_sig, mid, midi_events,
         reduce_cc_st, remap_track_channel, add_default_instr, remove_empty_channels, seed, seed_rand,
         gen_events, temp, top_p, top_k, allow_cc):
     bpm = int(bpm)
@@ -184,8 +184,10 @@ def run(tab, mid_seq, instruments, drum_kit, bpm, time_sig, key_sig, mid, midi_e
         for token_seq in mid:
             mid_seq.append(token_seq.tolist())
     elif tab == 2 and mid_seq is not None:
+        continuation_state.append(len(mid_seq))
         mid = np.asarray(mid_seq, dtype=np.int64)
     else:
+        continuation_state = [0]
         mid_seq = []
         mid = None
 
@@ -193,12 +195,11 @@ def run(tab, mid_seq, instruments, drum_kit, bpm, time_sig, key_sig, mid, midi_e
         max_len += len(mid)
 
     events = [tokenizer.tokens2event(tokens) for tokens in mid_seq]
-    if tab == 2:
-        init_msgs = [create_msg("visualizer_continue", tokenizer.version)]
-    else:
-        init_msgs = [create_msg("visualizer_clear", tokenizer.version),
+    init_msgs = [create_msg("progress", [0, gen_events])]
+    if tab != 2:
+        init_msgs += [create_msg("visualizer_clear", tokenizer.version),
                      create_msg("visualizer_append", events)]
-    yield mid_seq, None, None, seed, send_msgs(init_msgs)
+    yield mid_seq, continuation_state, None, None, seed, send_msgs(init_msgs)
     model = (model_base, model_token)
     midi_generator = generate(model, mid, max_len=max_len, temp=temp, top_p=top_p, top_k=top_k,
                          disable_patch_change=disable_patch_change, disable_control_change=not allow_cc,
@@ -211,27 +212,50 @@ def run(tab, mid_seq, instruments, drum_kit, bpm, time_sig, key_sig, mid, midi_e
         events.append(tokenizer.tokens2event(token_seq))
         ct = time.time()
         if ct - t > 0.2:
-            yield mid_seq, None, None, seed, send_msgs([create_msg("visualizer_append", events), create_msg("progress", [i + 1, gen_events])])
+            yield (mid_seq, continuation_state, None, None, seed,
+                   send_msgs([create_msg("visualizer_append", events),
+                              create_msg("progress", [i + 1, gen_events])]))
             t = ct
             events = []
 
+    events = [tokenizer.tokens2event(tokens) for tokens in mid_seq]
     mid = tokenizer.detokenize(mid_seq)
+    audio = synthesizer.synthesis(MIDI.score2opus(mid))
     with open(f"output.mid", 'wb') as f:
         f.write(MIDI.score2midi(mid))
-    audio = synthesizer.synthesis(MIDI.score2opus(mid))
-    events = [tokenizer.tokens2event(tokens) for tokens in mid_seq]
-    yield mid_seq, "output.mid", (44100, audio), seed, send_msgs([create_msg("visualizer_end", events)])
+    end_msgs = [create_msg("visualizer_clear", tokenizer.version),
+                create_msg("visualizer_append", events),
+                create_msg("visualizer_end", None),
+                create_msg("progress", [0, 0])]
+    yield mid_seq, continuation_state, "output.mid", (44100, audio), seed, send_msgs(end_msgs)
 
 
 def cancel_run(mid_seq):
     if mid_seq is None:
-        return None, None, []
+        return None, None, send_msgs([])
+    events = [tokenizer.tokens2event(tokens) for tokens in mid_seq]
     mid = tokenizer.detokenize(mid_seq)
+    audio = synthesizer.synthesis(MIDI.score2opus(mid))
     with open(f"output.mid", 'wb') as f:
         f.write(MIDI.score2midi(mid))
-    audio = synthesizer.synthesis(MIDI.score2opus(mid))
+    end_msgs = [create_msg("visualizer_clear", tokenizer.version),
+                create_msg("visualizer_append", events),
+                create_msg("visualizer_end", None),
+                create_msg("progress", [0, 0])]
+    return "output.mid", (44100, audio), send_msgs(end_msgs)
+
+
+def undo_continuation(mid_seq, continuation_state):
+    if mid_seq is None or len(continuation_state) < 2:
+        return mid_seq, continuation_state, send_msgs([])
+    mid_seq = mid_seq[:continuation_state[-1]]
+    continuation_state = continuation_state[:-1]
     events = [tokenizer.tokens2event(tokens) for tokens in mid_seq]
-    return "output.mid", (44100, audio), send_msgs([create_msg("visualizer_end", events)])
+    end_msgs = [create_msg("visualizer_clear", tokenizer.version),
+                create_msg("visualizer_append", events),
+                create_msg("visualizer_end", None),
+                create_msg("progress", [0, 0])]
+    return mid_seq, continuation_state, send_msgs(end_msgs)
 
 
 def download(url, output_file):
@@ -300,17 +324,17 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=-1, help="gradio server port")
     parser.add_argument("--max-gen", type=int, default=4096, help="max")
     parser.add_argument("--soundfont-path", type=str, default="soundfont.sf2", help="soundfont")
-    parser.add_argument("--model-config", type=str, default="tv2o-large", help="model config name")
+    parser.add_argument("--model-config", type=str, default="tv2o-medium", help="model config name")
     parser.add_argument("--model-base-path", type=str, default="model_base.onnx", help="model path")
     parser.add_argument("--model-token-path", type=str, default="model_token.onnx", help="model path")
     parser.add_argument("--soundfont-url", type=str,
                         default="https://huggingface.co/skytnt/midi-model/resolve/main/soundfont.sf2",
                         help="download soundfont to soundfont-path if file not exist")
     parser.add_argument("--model-base-url", type=str,
-                        default="https://huggingface.co/asigalov61/Music-Llama/resolve/main/onnx/model_base.onnx",
+                        default="https://huggingface.co/skytnt/midi-model-tv2o-medium/resolve/main/onnx/model_base.onnx",
                         help="download model-base to model-base-path if file not exist")
     parser.add_argument("--model-token-url", type=str,
-                        default="https://huggingface.co/asigalov61/Music-Llama/resolve/main/onnx/model_token.onnx",
+                        default="https://huggingface.co/skytnt/midi-model-tv2o-medium/resolve/main/onnx/model_token.onnx",
                         help="download model-token to model-token-path if file not exist")
     opt = parser.parse_args()
 
@@ -401,6 +425,7 @@ if __name__ == "__main__":
                 input_remove_empty_channels = gr.Checkbox(label="remove channels without notes", value=False)
             with gr.TabItem("last output prompt") as tab3:
                 gr.Markdown("Continue generating on the last output. Just click the generate button")
+                undo_btn = gr.Button("undo the last continuation")
 
         tab1.select(lambda: 0, None, tab_select, queue=False)
         tab2.select(lambda: 1, None, tab_select, queue=False)
@@ -413,23 +438,29 @@ if __name__ == "__main__":
         with gr.Accordion("options", open=False):
             input_temp = gr.Slider(label="temperature", minimum=0.1, maximum=1.2, step=0.01, value=1)
             input_top_p = gr.Slider(label="top p", minimum=0.1, maximum=1, step=0.01, value=0.98)
-            input_top_k = gr.Slider(label="top k", minimum=1, maximum=128, step=1, value=10)
+            input_top_k = gr.Slider(label="top k", minimum=1, maximum=128, step=1, value=12)
             input_allow_cc = gr.Checkbox(label="allow midi cc event", value=True)
-            example3 = gr.Examples([[1, 0.98, 20], [1, 0.98, 12]], [input_temp, input_top_p, input_top_k])
+            example3 = gr.Examples([[1, 0.93, 128], [1, 0.98, 20], [1, 0.98, 12]],
+                                   [input_temp, input_top_p, input_top_k])
         run_btn = gr.Button("generate", variant="primary")
         stop_btn = gr.Button("stop and output")
         output_midi_seq = gr.State()
+        output_continuation_state = gr.State([0])
         output_midi_visualizer = gr.HTML(elem_id="midi_visualizer_container")
         output_audio = gr.Audio(label="output audio", format="mp3", elem_id="midi_audio")
         output_midi = gr.File(label="output midi", file_types=[".mid"])
-        run_event = run_btn.click(run, [tab_select, output_midi_seq, input_instruments, input_drum_kit, input_bpm,
+        run_event = run_btn.click(run, [tab_select, output_midi_seq, output_continuation_state,
+                                        input_instruments, input_drum_kit, input_bpm,
                                         input_time_sig, input_key_sig, input_midi, input_midi_events,
                                         input_reduce_cc_st, input_remap_track_channel, input_add_default_instr,
                                         input_remove_empty_channels, input_seed, input_seed_rand, input_gen_events,
                                         input_temp, input_top_p, input_top_k, input_allow_cc],
-                                  [output_midi_seq, output_midi, output_audio, input_seed, js_msg],
+                                  [output_midi_seq, output_continuation_state,
+                                   output_midi, output_audio, input_seed, js_msg],
                                   concurrency_limit=3)
         stop_btn.click(cancel_run, [output_midi_seq], [output_midi, output_audio, js_msg], cancels=run_event, queue=False)
+        undo_btn.click(undo_continuation, [output_midi_seq, output_continuation_state],
+                            [output_midi_seq, output_continuation_state, js_msg], queue=False)
     try:
         port = opt.port
         if port == -1:

@@ -400,6 +400,8 @@ customElements.define('midi-visualizer', MidiVisualizer);
         }
     })
 
+    let hasProgressBar = false;
+
     function createProgressBar(progressbarContainer){
         let parentProgressbar = progressbarContainer.parentNode;
         let divProgress = document.createElement('div');
@@ -421,15 +423,23 @@ customElements.define('midi-visualizer', MidiVisualizer);
         divInner.style.width = "0%";
         divProgress.appendChild(divInner);
         parentProgressbar.insertBefore(divProgress, progressbarContainer);
+        hasProgressBar = true;
     }
 
     function removeProgressBar(progressbarContainer){
         let parentProgressbar = progressbarContainer.parentNode;
         let divProgress = parentProgressbar.querySelector(".progressDiv");
         parentProgressbar.removeChild(divProgress);
+        hasProgressBar = false;
     }
 
     function setProgressBar(progressbarContainer, progress, total){
+        if (!hasProgressBar)
+            createProgressBar(midi_visualizer_container_inited)
+        if (hasProgressBar && total === 0){
+            removeProgressBar(midi_visualizer_container_inited)
+            return
+        }
         let parentProgressbar = progressbarContainer.parentNode;
         let divProgress = parentProgressbar.querySelector(".progressDiv");
         let divInner = parentProgressbar.querySelector(".progress");
@@ -453,30 +463,20 @@ customElements.define('midi-visualizer', MidiVisualizer);
             case "visualizer_clear":
                 midi_visualizer.clearMidiEvents(false);
                 midi_visualizer.version = msg.data
-                createProgressBar(midi_visualizer_container_inited)
-                break;
-            case "visualizer_continue":
-                midi_visualizer.version = msg.data
-                createProgressBar(midi_visualizer_container_inited)
                 break;
             case "visualizer_append":
                 msg.data.forEach( value => {
                     midi_visualizer.appendMidiEvent(value);
                 })
                 break;
+            case "visualizer_end":
+                midi_visualizer.finishAppendMidiEvent()
+                midi_visualizer.setPlayTime(0);
+                break;
             case "progress":
                 let progress = msg.data[0]
                 let total = msg.data[1]
                 setProgressBar(midi_visualizer_container_inited, progress, total)
-                break;
-            case "visualizer_end":
-                midi_visualizer.clearMidiEvents(true);
-                msg.data.forEach( value => {
-                    midi_visualizer.appendMidiEvent(value);
-                })
-                midi_visualizer.finishAppendMidiEvent()
-                midi_visualizer.setPlayTime(0);
-                removeProgressBar(midi_visualizer_container_inited);
                 break;
             default:
         }

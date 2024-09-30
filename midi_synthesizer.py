@@ -22,8 +22,8 @@ class MidiSynthesizer:
         return device
 
     def release_fluidsynth(self, device):
-        device[0].system_reset()
         device[0].get_samples(self.sample_rate*5) # wait for silence
+        device[0].system_reset()
         device[2] = False
 
     def synthesis(self, midi_opus):
