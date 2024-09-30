@@ -351,9 +351,11 @@ class MidiVisualizer extends HTMLElement{
                 this.setPlayTime(t);
                 this.pianoRoll.scrollTo(this.svgWidth - this.pianoRoll.offsetWidth, this.pianoRoll.scrollTop)
             }else if(midiEvent[0] === "patch_change"){
+                let track = midiEvent[2]
                 let channel = midiEvent[3]
                 this.patches[channel].push([t, midiEvent[4]])
                 this.patches[channel].sort((a, b) => a[0] - b[0])
+                this.getTrack(track, channel);
             }
             this.midiEvents.push(midiEvent);
             this.svg.style.width = `${this.svgWidth}px`;
