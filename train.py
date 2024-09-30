@@ -269,9 +269,6 @@ if __name__ == '__main__':
     parser.add_argument("--max-step", type=int, default=1e6, help="max training step")
     parser.add_argument("--grad-clip", type=float, default=1.0, help="gradient clip val")
     parser.add_argument(
-        "--curriculum-learning", action="store_true", default=False, help="enable curriculum learning"
-    )
-    parser.add_argument(
         "--sample-seq", action="store_true", default=False, help="sample midi seq to reduce vram"
     )
     parser.add_argument(
@@ -341,8 +338,6 @@ if __name__ == '__main__':
     train_dataset_len = full_dataset_len - opt.data_val_split
     train_midi_list = midi_list[:train_dataset_len]
     val_midi_list = midi_list[train_dataset_len:]
-    if opt.curriculum_learning:
-        train_midi_list = sorted(train_midi_list, key=lambda x: os.path.getsize(x))
     train_dataset = MidiDataset(train_midi_list, tokenizer, max_len=opt.max_len, aug=True, check_quality=opt.quality, rand_start=True)
     val_dataset = MidiDataset(val_midi_list, tokenizer, max_len=opt.max_len, aug=False, check_quality=opt.quality, rand_start=False)
     train_dataloader = DataLoader(

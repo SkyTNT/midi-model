@@ -98,14 +98,26 @@ function HSVtoRGB(h, s, v) {
     };
 }
 
+function isMobile(){
+  return /(iPhone|iPad|iPod|iOS|Android|Windows Phone)/i.test(navigator.userAgent);
+}
+
+const number2patch = ['Acoustic Grand', 'Bright Acoustic', 'Electric Grand', 'Honky-Tonk', 'Electric Piano 1', 'Electric Piano 2', 'Harpsichord', 'Clav', 'Celesta', 'Glockenspiel', 'Music Box', 'Vibraphone', 'Marimba', 'Xylophone', 'Tubular Bells', 'Dulcimer', 'Drawbar Organ', 'Percussive Organ', 'Rock Organ', 'Church Organ', 'Reed Organ', 'Accordion', 'Harmonica', 'Tango Accordion', 'Acoustic Guitar(nylon)', 'Acoustic Guitar(steel)', 'Electric Guitar(jazz)', 'Electric Guitar(clean)', 'Electric Guitar(muted)', 'Overdriven Guitar', 'Distortion Guitar', 'Guitar Harmonics', 'Acoustic Bass', 'Electric Bass(finger)', 'Electric Bass(pick)', 'Fretless Bass', 'Slap Bass 1', 'Slap Bass 2', 'Synth Bass 1', 'Synth Bass 2', 'Violin', 'Viola', 'Cello', 'Contrabass', 'Tremolo Strings', 'Pizzicato Strings', 'Orchestral Harp', 'Timpani', 'String Ensemble 1', 'String Ensemble 2', 'SynthStrings 1', 'SynthStrings 2', 'Choir Aahs', 'Voice Oohs', 'Synth Voice', 'Orchestra Hit', 'Trumpet', 'Trombone', 'Tuba', 'Muted Trumpet', 'French Horn', 'Brass Section', 'SynthBrass 1', 'SynthBrass 2', 'Soprano Sax', 'Alto Sax', 'Tenor Sax', 'Baritone Sax', 'Oboe', 'English Horn', 'Bassoon', 'Clarinet', 'Piccolo', 'Flute', 'Recorder', 'Pan Flute', 'Blown Bottle', 'Skakuhachi', 'Whistle', 'Ocarina', 'Lead 1 (square)', 'Lead 2 (sawtooth)', 'Lead 3 (calliope)', 'Lead 4 (chiff)', 'Lead 5 (charang)', 'Lead 6 (voice)', 'Lead 7 (fifths)', 'Lead 8 (bass+lead)', 'Pad 1 (new age)', 'Pad 2 (warm)', 'Pad 3 (polysynth)', 'Pad 4 (choir)', 'Pad 5 (bowed)', 'Pad 6 (metallic)', 'Pad 7 (halo)', 'Pad 8 (sweep)', 'FX 1 (rain)', 'FX 2 (soundtrack)', 'FX 3 (crystal)', 'FX 4 (atmosphere)', 'FX 5 (brightness)', 'FX 6 (goblins)', 'FX 7 (echoes)', 'FX 8 (sci-fi)', 'Sitar', 'Banjo', 'Shamisen', 'Koto', 'Kalimba', 'Bagpipe', 'Fiddle', 'Shanai', 'Tinkle Bell', 'Agogo', 'Steel Drums', 'Woodblock', 'Taiko Drum', 'Melodic Tom', 'Synth Drum', 'Reverse Cymbal', 'Guitar Fret Noise', 'Breath Noise', 'Seashore', 'Bird Tweet', 'Telephone Ring', 'Helicopter', 'Applause', 'Gunshot']
+const number2drum_kits = {0: "Standard", 8: "Room", 16: "Power", 24: "Electric", 25: "TR-808", 32: "Jazz", 40: "Blush", 48: "Orchestra"}
+
 class MidiVisualizer extends HTMLElement{
     constructor() {
         super();
         this.midiEvents = [];
         this.activeNotes = [];
         this.midiTimes = [];
-        this.patches = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
-        this.wrapper = null;
+        this.trackMap = new Map()
+        this.patches = [];
+        for (let i=0;i<16;i++){
+            this.patches.push([[0,0]])
+        }
+        this.trackList = null
+        this.pianoRoll = null;
         this.svg = null;
         this.timeLine = null;
         this.config = {
@@ -130,27 +142,153 @@ class MidiVisualizer extends HTMLElement{
         this.innerHTML=''
         const shadow = this.attachShadow({mode: 'open'});
         const style = document.createElement("style");
-        const wrapper = document.createElement('div');
+        const container = document.createElement('div');
+        container.style.display="flex";
+        container.style.height=`${this.config.noteHeight*128}px`;
+        const trackListContainer = document.createElement('div');
+        trackListContainer.style.width = "260px";
+        trackListContainer.style.minWidth = "260px";
+        trackListContainer.style.height = "100%";
+        trackListContainer.style.display="flex";
+        trackListContainer.style.flexDirection="column";
+        if (isMobile()){
+            trackListContainer.style.display = "none";
+        }
+        const trackList = document.createElement('div');
+        trackList.style.width = "100%";
+        trackList.style.height = "100%";
+        trackList.style.overflowY= "scroll";
+        trackList.style.display="flex";
+        trackList.style.flexDirection="column";
+        trackList.style.flexGrow="1";
+        const trackControls = document.createElement('div');
+        trackControls.style.display="flex";
+        trackControls.style.flexDirection="row";
+        trackControls.style.width = "100%";
+        trackControls.style.height = "50px";
+        trackControls.style.minHeight = "50px";
+        const allTrackBtn = document.createElement('button');
+        allTrackBtn.textContent = "All";
+        allTrackBtn.style.width = "50%";
+        allTrackBtn.style.height = "100%";
+        allTrackBtn.style.backgroundColor = "transparent";
+        allTrackBtn.style.border = "none";
+        allTrackBtn.style.cursor = 'pointer';
+        let self = this;
+        allTrackBtn.onclick = function (){
+            self.trackMap.forEach((track, id) => {
+                track.setChecked(true);
+            })
+        };
+        const noneTrackBtn = document.createElement('button');
+        noneTrackBtn.textContent = "None";
+        noneTrackBtn.style.width = "50%";
+        noneTrackBtn.style.height = "100%";
+        noneTrackBtn.style.backgroundColor = "transparent";
+        noneTrackBtn.style.border = "none";
+        noneTrackBtn.style.cursor = 'pointer';
+        noneTrackBtn.onclick = function (){
+            self.trackMap.forEach((track, id) => {
+                track.setChecked(false);
+            });
+        };
+        const pianoRoll = document.createElement('div');
         style.textContent = ".note.active {stroke: black;stroke-width: 0.75;stroke-opacity: 0.75;}";
-        wrapper.style.overflowX= "scroll"
+        pianoRoll.style.overflowX= "scroll";
+        pianoRoll.style.flexGrow="1";
         const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
         svg.style.height = `${this.config.noteHeight*128}px`;
         svg.style.width = `${this.svgWidth}px`;
         const timeLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
         timeLine.style.stroke = "green"
         timeLine.style.strokeWidth = 2;
+
         shadow.appendChild(style)
-        shadow.appendChild(wrapper);
-        wrapper.appendChild(svg);
+        shadow.appendChild(container);
+        container.appendChild(trackListContainer);
+        trackListContainer.appendChild(trackList);
+        trackListContainer.appendChild(trackControls);
+        trackControls.appendChild(allTrackBtn);
+        trackControls.appendChild(noneTrackBtn);
+        container.appendChild(pianoRoll);
+        pianoRoll.appendChild(svg);
         svg.appendChild(timeLine)
-        this.wrapper = wrapper;
+        this.trackList = trackList;
+        this.pianoRoll = pianoRoll;
         this.svg = svg;
         this.timeLine= timeLine;
-        for(let i = 0; i <= 128 ; i++){
-            this.colorMap.set(i, HSVtoRGB(i / 129, 1, 1))
+        for(let i = 0; i < 128 ; i++){
+            this.colorMap.set(i, HSVtoRGB(i / 128, 1, 1))
         }
-        console.log(this.colorMap)
         this.setPlayTime(0);
+    }
+
+    addTrack(id, tr, cl, name, color){
+        const track = {id, tr, cl, name, color,
+            instrument: cl===9?"Standard Drum":"Acoustic Grand",
+            svg: document.createElementNS('http://www.w3.org/2000/svg', 'g')}
+        this.svg.appendChild(track.svg)
+        const trackItem = this.createTrackItem(track);
+        this.trackList.appendChild(trackItem);
+        this.trackMap.set(id, track);
+        return track;
+    }
+
+    getTrack(tr, cl){
+        const id = tr * 16 + cl
+        let track = this.trackMap.get(id)
+        if (!!track){
+            return track
+        }
+        let color = this.colorMap.get((this.trackMap.size*17)%128)
+        return this.addTrack(id, tr, cl, `Track ${tr}, Channel ${cl}`, color)
+    }
+
+    createTrackItem(track) {
+        const trackItem = document.createElement('div');
+        trackItem.style.display = 'flex';
+        trackItem.style.alignItems = 'center';
+        trackItem.style.width = '100%';
+        trackItem.style.position = 'relative';
+
+        const colorBar = document.createElement('div');
+        colorBar.style.width = '5%';
+        colorBar.style.height = '100%';
+        colorBar.style.position = 'absolute';
+        colorBar.style.left = '0';
+        colorBar.style.top = '0';
+        let color = track.color;
+        colorBar.style.backgroundColor = `rgb(${color.r}, ${color.g}, ${color.b})`;
+        trackItem.appendChild(colorBar);
+
+        const content = document.createElement('div');
+        content.style.paddingLeft = '30px';
+        content.style.flexGrow = '1';
+        content.innerHTML = `<p>${track.name}<br>${track.instrument}</p>`;
+        trackItem.appendChild(content);
+        track.updateInstrument = function (instrument){
+            track.instrument = instrument;
+            content.innerHTML = `<p>${track.name}<br>${track.instrument}</p>`;
+        }
+
+        const toggleSwitch = document.createElement('input');
+        toggleSwitch.type = 'checkbox';
+        toggleSwitch.checked = true;
+        toggleSwitch.style.marginLeft = 'auto';
+        toggleSwitch.style.marginRight = '10px';
+        toggleSwitch.style.width = '20px';
+        toggleSwitch.style.height = '20px';
+        toggleSwitch.style.cursor = 'pointer';
+
+        toggleSwitch.onchange = function () {
+            track.svg.setAttribute('visibility',toggleSwitch.checked? "visible" : "hidden")
+        };
+        track.setChecked = function (checked){
+            toggleSwitch.checked = checked;
+            track.svg.setAttribute('visibility',toggleSwitch.checked? "visible" : "hidden")
+        }
+        trackItem.appendChild(toggleSwitch);
+        return trackItem;
     }
 
     clearMidiEvents(){
@@ -158,12 +296,17 @@ class MidiVisualizer extends HTMLElement{
         this.midiEvents = [];
         this.activeNotes = [];
         this.midiTimes = [];
-        this.patches = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+        this.trackMap = new Map()
+        this.patches = [];
+        for (let i=0;i<16;i++){
+            this.patches.push([[0,0]])
+        }
         this.t1 = 0
         this.setPlayTime(0);
         this.totalTimeMs = 0;
         this.playTimeMs = 0
         this.lastUpdateTime = 0
+        this.trackList.innerHTML = ''
         this.svgWidth = 0
         this.svg.innerHTML = ''
         this.svg.style.width = `${this.svgWidth}px`;
@@ -193,21 +336,24 @@ class MidiVisualizer extends HTMLElement{
                     velocity = midiEvent[5]
                     duration = midiEvent[6]
                 }
+                let vis_track = this.getTrack(track, channel);
 
                 let x = (t/this.timePreBeat)*this.config.beatWidth
                 let y = (127 - pitch)*this.config.noteHeight
                 let w = (duration/this.timePreBeat)*this.config.beatWidth
                 let h = this.config.noteHeight
                 this.svgWidth = Math.ceil(Math.max(x + w, this.svgWidth))
-                let color = this.getColor(track, channel)
+                let color = vis_track.color
                 let opacity = Math.min(1, velocity/127 + 0.1).toFixed(2)
-                let rect = this.drawNote(x,y,w,h, `rgba(${color.r}, ${color.g}, ${color.b}, ${opacity})`)
+                let rect = this.drawNote(vis_track.svg, x,y,w,h,
+                    `rgba(${color.r}, ${color.g}, ${color.b}, ${opacity})`)
                 midiEvent.push(rect)
                 this.setPlayTime(t);
-                this.wrapper.scrollTo(this.svgWidth - this.wrapper.offsetWidth, 0)
+                this.pianoRoll.scrollTo(this.svgWidth - this.pianoRoll.offsetWidth, this.pianoRoll.scrollTop)
             }else if(midiEvent[0] === "patch_change"){
                 let channel = midiEvent[3]
-                this.patches[channel] = midiEvent[4]
+                this.patches[channel].push([t, midiEvent[4]])
+                this.patches[channel].sort((a, b) => a[0] - b[0])
             }
             this.midiEvents.push(midiEvent);
             this.svg.style.width = `${this.svgWidth}px`;
@@ -215,23 +361,8 @@ class MidiVisualizer extends HTMLElement{
 
     }
 
-    getColor(track, channel){
-        let key = this.patches[channel];
-        if( channel === 9){
-            // drum
-            key = 128;
-        }
-        let color = this.colorMap.get(key);
-        if(!!color){
-            return color;
-        }
-        color = HSVtoRGB(Math.random(),Math.random()*0.5 + 0.5,1);
-        this.colorMap.set(key, color);
-        return color;
-    }
-
-    drawNote(x, y, w, h, fill) {
-        if (!this.svg) {
+    drawNote(svg, x, y, w, h, fill) {
+        if (!svg) {
           return null;
         }
         const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
@@ -242,7 +373,7 @@ class MidiVisualizer extends HTMLElement{
         rect.setAttribute('y', `${Math.round(y)}`);
         rect.setAttribute('width', `${Math.round(w)}`);
         rect.setAttribute('height', `${Math.round(h)}`);
-        this.svg.appendChild(rect);
+        svg.appendChild(rect);
         return rect
     }
 
@@ -277,7 +408,30 @@ class MidiVisualizer extends HTMLElement{
         this.timeLine.setAttribute('x2', `${x}`);
         this.timeLine.setAttribute('y2', `${this.config.noteHeight*128}`);
 
-        this.wrapper.scrollTo(Math.max(0, x - this.wrapper.offsetWidth/2), 0)
+        this.pianoRoll.scrollTo(Math.max(0, x - this.pianoRoll.offsetWidth/2), this.pianoRoll.scrollTop)
+
+        this.trackMap.forEach((track, id)=>{
+            let instrument = track.instrument
+            let cl = track.cl;
+            let patches = this.patches[cl]
+            let p = 0
+            for (let i = 0; i < patches.length ; i++){
+                let tp = patches[i]
+                if (t < tp[0])
+                    break
+                p = tp[1]
+            }
+            if (cl === 9){
+                let drumKit = number2drum_kits[`${p}`];
+                if (!!drumKit)
+                    instrument = drumKit + " Drum";
+            }else{
+                instrument = number2patch[p]
+            }
+            if (instrument !== track.instrument)
+                track.updateInstrument(instrument)
+        });
+
         let dt = Date.now() - this.lastUpdateTime; // limit the update rate of ActiveNotes
         if(this.playing && dt > 50){
             let activeNotes = []
@@ -291,7 +445,7 @@ class MidiVisualizer extends HTMLElement{
                         activeNotes.push(note)
                     }
                 }
-            })
+            });
             this.addActiveNotes(activeNotes)
             this.lastUpdateTime = Date.now();
         }
