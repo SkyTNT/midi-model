@@ -380,7 +380,7 @@ if __name__ == "__main__":
         """)
         tab_select = gr.State(value=0)
         with gr.Tabs():
-            with gr.TabItem("instrument prompt") as tab1:
+            with gr.TabItem("custom prompt") as tab1:
                 input_instruments = gr.Dropdown(label="🪗instruments (auto if empty)", choices=list(patch2number.keys()),
                                                 multiselect=True, max_choices=15, type="value")
                 input_drum_kit = gr.Dropdown(label="🥁drum kit", choices=list(drum_kits2number.keys()), type="value",
