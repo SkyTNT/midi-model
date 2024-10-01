@@ -279,6 +279,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=7860, help="gradio server port")
     parser.add_argument("--device", type=str, default="cuda", help="device to run model")
+    parser.add_argument("--share", action="store_true", default=False, help="share gradio")
     opt = parser.parse_args()
     soundfont_path = hf_hub_download(repo_id="skytnt/midi-model", filename="soundfont.sf2")
     synthesizer = MidiSynthesizer(soundfont_path)
@@ -391,4 +392,4 @@ if __name__ == "__main__":
                        queue=False)
         undo_btn.click(undo_continuation, [output_midi_seq, output_continuation_state],
                             [output_midi_seq, output_continuation_state, js_msg], queue=False)
-    app.launch(server_port=opt.port, inbrowser=True)
+    app.launch(server_port=opt.port, inbrowser=True, share=opt.share)
