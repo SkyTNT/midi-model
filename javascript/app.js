@@ -415,7 +415,7 @@ class MidiVisualizer extends HTMLElement{
             path.setAttribute('stroke', `rgba(${color.r}, ${color.g}, ${color.b}, 0.6)`);
             path.setAttribute('stroke-width', "1");
             path.setAttribute('d',
-                t===0?`M ${x} ${y}`:`M 0 ${127*this.config.noteHeight} H ${x} L ${x} ${y}`);
+                t===0?`M ${x} ${y}`:`M 0 ${127*this.config.noteHeight} H ${x} V ${y}`);
             track.svg.appendChild(path);
             track.ccPaths.set(controller, path);
             track.lastCC.set(controller, value);
@@ -426,7 +426,7 @@ class MidiVisualizer extends HTMLElement{
             path.removeAttribute('visibility');
         }
         let d = path.getAttribute("d");
-        d += `H ${x} L ${x} ${y}`
+        d += `H ${x} V ${y}`
         path.setAttribute('d', d);
         return path
     }
