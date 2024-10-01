@@ -175,22 +175,24 @@ def run(tab, mid_seq, continuation_state, instruments, drum_kit, bpm, time_sig, 
         init_msgs += [create_msg("visualizer_clear", tokenizer.version),
                      create_msg("visualizer_append", events)]
     yield mid_seq, continuation_state, None, None, seed, send_msgs(init_msgs)
-    midi_generator = generate(mid, max_len=max_len, temp=temp, top_p=top_p, top_k=top_k,
-                              disable_patch_change=disable_patch_change, disable_control_change=not allow_cc,
-                              disable_channels=disable_channels, generator=generator)
-    events = []
-    t = time.time()
-    for i, token_seq in enumerate(midi_generator):
-        token_seq = token_seq.tolist()
-        mid_seq.append(token_seq)
-        events.append(tokenizer.tokens2event(token_seq))
-        ct = time.time()
-        if ct - t > 0.2:
-            yield (mid_seq, continuation_state, None, None, seed,
-                   send_msgs([create_msg("visualizer_append", events),
-                              create_msg("progress", [i + 1, gen_events])]))
-            t = ct
-            events = []
+    ctx = torch.amp.autocast(device_type=opt.device, dtype=torch.bfloat16, enabled=opt.device != "cpu")
+    with ctx:
+        midi_generator = generate(mid, max_len=max_len, temp=temp, top_p=top_p, top_k=top_k,
+                                  disable_patch_change=disable_patch_change, disable_control_change=not allow_cc,
+                                  disable_channels=disable_channels, generator=generator)
+        events = []
+        t = time.time()
+        for i, token_seq in enumerate(midi_generator):
+            token_seq = token_seq.tolist()
+            mid_seq.append(token_seq)
+            events.append(tokenizer.tokens2event(token_seq))
+            ct = time.time()
+            if ct - t > 0.2:
+                yield (mid_seq, continuation_state, None, None, seed,
+                       send_msgs([create_msg("visualizer_append", events),
+                                  create_msg("progress", [i + 1, gen_events])]))
+                t = ct
+                events = []
 
     mid = tokenizer.detokenize(mid_seq)
     audio = synthesizer.synthesis(MIDI.score2opus(mid))
