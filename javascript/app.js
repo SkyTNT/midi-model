@@ -174,6 +174,8 @@ class MidiVisualizer extends HTMLElement{
         allTrackBtn.textContent = "All";
         allTrackBtn.style.width = "50%";
         allTrackBtn.style.height = "100%";
+        allTrackBtn.style.backgroundColor = "rgba(200, 200, 200, 0.3)";
+        allTrackBtn.style.color = 'inherit';
         allTrackBtn.style.border = "none";
         allTrackBtn.style.cursor = 'pointer';
         let self = this;
@@ -186,6 +188,8 @@ class MidiVisualizer extends HTMLElement{
         noneTrackBtn.textContent = "None";
         noneTrackBtn.style.width = "50%";
         noneTrackBtn.style.height = "100%";
+        noneTrackBtn.style.backgroundColor = "rgba(200, 200, 200, 0.3)";
+        noneTrackBtn.style.color = 'inherit';
         noneTrackBtn.style.border = "none";
         noneTrackBtn.style.cursor = 'pointer';
         noneTrackBtn.onclick = function (){
@@ -281,7 +285,7 @@ class MidiVisualizer extends HTMLElement{
         }
         track.setEmpty = function (empty){
             if (empty!==track.empty){
-                content.style.color = empty?"grey":"black";
+                content.style.color = empty?"grey":"inherit";
             }
         }
 
