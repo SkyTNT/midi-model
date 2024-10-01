@@ -229,9 +229,12 @@ class MidiVisualizer extends HTMLElement{
     }
 
     addTrack(id, tr, cl, name, color){
-        const track = {id, tr, cl, name, color,
+        const track = {id, tr, cl, name, color, empty: true,
+            lastCC: new Map(),
             instrument: cl===9?"Standard Drum":"Acoustic Grand",
-            svg: document.createElementNS('http://www.w3.org/2000/svg', 'g')}
+            svg: document.createElementNS('http://www.w3.org/2000/svg', 'g'),
+            ccPaths: new Map()
+        }
         this.svg.appendChild(track.svg)
         const trackItem = this.createTrackItem(track);
         this.trackList.appendChild(trackItem);
@@ -269,11 +272,17 @@ class MidiVisualizer extends HTMLElement{
         const content = document.createElement('div');
         content.style.paddingLeft = '30px';
         content.style.flexGrow = '1';
+        content.style.color = "grey"
         content.innerHTML = `<p>${track.name}<br>${track.instrument}</p>`;
         trackItem.appendChild(content);
         track.updateInstrument = function (instrument){
             track.instrument = instrument;
             content.innerHTML = `<p>${track.name}<br>${track.instrument}</p>`;
+        }
+        track.setEmpty = function (empty){
+            if (empty!==track.empty){
+                content.style.color = empty?"grey":"black";
+            }
         }
 
         const toggleSwitch = document.createElement('input');
@@ -342,25 +351,31 @@ class MidiVisualizer extends HTMLElement{
                     duration = midiEvent[6]
                 }
                 let vis_track = this.getTrack(track, channel);
-
+                vis_track.setEmpty(false);
                 let x = (t/this.timePreBeat)*this.config.beatWidth
                 let y = (127 - pitch)*this.config.noteHeight
                 let w = (duration/this.timePreBeat)*this.config.beatWidth
                 let h = this.config.noteHeight
                 this.svgWidth = Math.ceil(Math.max(x + w, this.svgWidth))
-                let color = vis_track.color
                 let opacity = Math.min(1, velocity/127 + 0.1).toFixed(2)
-                let rect = this.drawNote(vis_track.svg, x,y,w,h,
-                    `rgba(${color.r}, ${color.g}, ${color.b}, ${opacity})`)
-                midiEvent.push(rect)
+                let rect = this.drawNote(vis_track, x,y,w,h, opacity)
+                midiEvent.push(rect);
                 this.setPlayTime(t);
                 this.pianoRoll.scrollTo(this.svgWidth - this.pianoRoll.offsetWidth, this.pianoRoll.scrollTop)
             }else if(midiEvent[0] === "patch_change"){
-                let track = midiEvent[2]
-                let channel = midiEvent[3]
-                this.patches[channel].push([t, midiEvent[4]])
-                this.patches[channel].sort((a, b) => a[0] - b[0])
+                let track = midiEvent[2];
+                let channel = midiEvent[3];
+                this.patches[channel].push([t, midiEvent[4]]);
+                this.patches[channel].sort((a, b) => a[0] - b[0]);
                 this.getTrack(track, channel);
+            }else if(midiEvent[0] === "control_change"){
+                let track = midiEvent[2];
+                let channel = midiEvent[3];
+                let controller = midiEvent[4];
+                let value = midiEvent[5];
+                let vis_track = this.getTrack(track, channel);
+                this.drawCC(vis_track, t, controller, value);
+                this.setPlayTime(t);
             }
             this.midiEvents.push(midiEvent);
             this.svg.style.width = `${this.svgWidth}px`;
@@ -368,20 +383,52 @@ class MidiVisualizer extends HTMLElement{
 
     }
 
-    drawNote(svg, x, y, w, h, fill) {
-        if (!svg) {
+    drawNote(track, x, y, w, h, opacity) {
+        if (!track.svg) {
           return null;
         }
         const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
         rect.classList.add('note');
-        rect.setAttribute('fill', fill);
+        const color = track.color;
+        rect.setAttribute('fill', `rgba(${color.r}, ${color.g}, ${color.b}, ${opacity})`);
         // Round values to the nearest integer to avoid partially filled pixels.
         rect.setAttribute('x', `${Math.round(x)}`);
         rect.setAttribute('y', `${Math.round(y)}`);
         rect.setAttribute('width', `${Math.round(w)}`);
         rect.setAttribute('height', `${Math.round(h)}`);
-        svg.appendChild(rect);
+        track.svg.appendChild(rect);
         return rect
+    }
+
+    drawCC(track, t, controller, value){
+        if (!track.svg) {
+          return null;
+        }
+        let path = track.ccPaths.get(controller);
+        let x = (t/this.timePreBeat)*this.config.beatWidth
+        let y = (127 - value)*this.config.noteHeight
+        if (!path){
+            path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.setAttribute('visibility',"hidden");
+            path.setAttribute('fill', "transparent");
+            const color = track.color;
+            path.setAttribute('stroke', `rgba(${color.r}, ${color.g}, ${color.b}, 0.6)`);
+            path.setAttribute('stroke-width', "1");
+            path.setAttribute('d',
+                t===0?`M ${x} ${y}`:`M 0 ${127*this.config.noteHeight} H ${x} L ${x} ${y}`);
+            track.svg.appendChild(path);
+            track.ccPaths.set(controller, path);
+            track.lastCC.set(controller, value);
+            return path;
+        }
+        let lastVal = track.lastCC.get(controller);
+        if(lastVal !== value){
+            path.removeAttribute('visibility');
+        }
+        let d = path.getAttribute("d");
+        d += `H ${x} L ${x} ${y}`
+        path.setAttribute('d', d);
+        return path
     }
 
     finishAppendMidiEvent(){
@@ -404,6 +451,14 @@ class MidiVisualizer extends HTMLElement{
                 this.totalTimeMs = Math.max(this.totalTimeMs, ms);
             }
             lastT = t;
+        })
+        let x = (lastT/this.timePreBeat)*this.config.beatWidth;
+        this.trackMap.forEach((track, id)=>{
+            track.ccPaths.forEach((path, controller)=>{
+                let d = path.getAttribute("d");
+                d += `H ${x}`
+                path.setAttribute('d', d);
+            })
         })
     }
 

@@ -194,6 +194,7 @@ def run(tab, mid_seq, continuation_state, instruments, drum_kit, bpm, time_sig, 
                 t = ct
                 events = []
 
+    events = [tokenizer.tokens2event(tokens) for tokens in mid_seq]
     mid = tokenizer.detokenize(mid_seq)
     audio = synthesizer.synthesis(MIDI.score2opus(mid))
     with open(f"output.mid", 'wb') as f:
