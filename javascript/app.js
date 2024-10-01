@@ -116,6 +116,7 @@ class MidiVisualizer extends HTMLElement{
         for (let i=0;i<16;i++){
             this.patches.push([[0,0]])
         }
+        this.container = null;
         this.trackList = null
         this.pianoRoll = null;
         this.svg = null;
@@ -123,6 +124,10 @@ class MidiVisualizer extends HTMLElement{
         this.config = {
             noteHeight : 4,
             beatWidth: 32
+        }
+        if (isMobile()){
+            this.config.noteHeight = 1;
+            this.config.beatWidth = 16;
         }
         this.timePreBeat = 16
         this.svgWidth = 0;
@@ -142,18 +147,16 @@ class MidiVisualizer extends HTMLElement{
         this.innerHTML=''
         const shadow = this.attachShadow({mode: 'open'});
         const style = document.createElement("style");
+        style.textContent = ".note.active {stroke: black;stroke-width: 0.75;stroke-opacity: 0.75;}";
         const container = document.createElement('div');
         container.style.display="flex";
-        container.style.height=`${this.config.noteHeight*128}px`;
+        container.style.height=`${this.config.noteHeight*128 + 25}px`;
         const trackListContainer = document.createElement('div');
         trackListContainer.style.width = "260px";
         trackListContainer.style.minWidth = "260px";
         trackListContainer.style.height = "100%";
         trackListContainer.style.display="flex";
         trackListContainer.style.flexDirection="column";
-        if (isMobile()){
-            trackListContainer.style.display = "none";
-        }
         const trackList = document.createElement('div');
         trackList.style.width = "100%";
         trackList.style.height = "100%";
@@ -171,7 +174,6 @@ class MidiVisualizer extends HTMLElement{
         allTrackBtn.textContent = "All";
         allTrackBtn.style.width = "50%";
         allTrackBtn.style.height = "100%";
-        allTrackBtn.style.backgroundColor = "transparent";
         allTrackBtn.style.border = "none";
         allTrackBtn.style.cursor = 'pointer';
         let self = this;
@@ -184,7 +186,6 @@ class MidiVisualizer extends HTMLElement{
         noneTrackBtn.textContent = "None";
         noneTrackBtn.style.width = "50%";
         noneTrackBtn.style.height = "100%";
-        noneTrackBtn.style.backgroundColor = "transparent";
         noneTrackBtn.style.border = "none";
         noneTrackBtn.style.cursor = 'pointer';
         noneTrackBtn.onclick = function (){
@@ -193,7 +194,6 @@ class MidiVisualizer extends HTMLElement{
             });
         };
         const pianoRoll = document.createElement('div');
-        style.textContent = ".note.active {stroke: black;stroke-width: 0.75;stroke-opacity: 0.75;}";
         pianoRoll.style.overflowX= "scroll";
         pianoRoll.style.flexGrow="1";
         const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -201,8 +201,12 @@ class MidiVisualizer extends HTMLElement{
         svg.style.width = `${this.svgWidth}px`;
         const timeLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
         timeLine.style.stroke = "green"
-        timeLine.style.strokeWidth = 2;
+        timeLine.style.strokeWidth = "2";
 
+        if (isMobile()){
+            trackListContainer.style.display = "none";
+            timeLine.style.strokeWidth = "1";
+        }
         shadow.appendChild(style)
         shadow.appendChild(container);
         container.appendChild(trackListContainer);
@@ -213,6 +217,7 @@ class MidiVisualizer extends HTMLElement{
         container.appendChild(pianoRoll);
         pianoRoll.appendChild(svg);
         svg.appendChild(timeLine)
+        this.container = container;
         this.trackList = trackList;
         this.pianoRoll = pianoRoll;
         this.svg = svg;
@@ -240,7 +245,7 @@ class MidiVisualizer extends HTMLElement{
         if (!!track){
             return track
         }
-        let color = this.colorMap.get((this.trackMap.size*17)%128)
+        let color = this.colorMap.get((this.trackMap.size*53)%128)
         return this.addTrack(id, tr, cl, `Track ${tr}, Channel ${cl}`, color)
     }
 
