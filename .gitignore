@@ -152,3 +152,4 @@ cython_debug/
 .idea/
 save_models/
 output.mid
+/outputs/

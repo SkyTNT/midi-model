@@ -1,27 +1,29 @@
 import argparse
 import glob
 import json
+import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Union, Optional
 
 import gradio as gr
 import numpy as np
 import torch
-
 import torch.nn.functional as F
 import tqdm
+from huggingface_hub import hf_hub_download
 
 import MIDI
 from midi_model import MIDIModel, config_name_list, MIDIModelConfig
-from midi_tokenizer import MIDITokenizerV1, MIDITokenizerV2
 from midi_synthesizer import MidiSynthesizer
-from huggingface_hub import hf_hub_download
+from midi_tokenizer import MIDITokenizerV1, MIDITokenizerV2
 
 MAX_SEED = np.iinfo(np.int32).max
+OUTPUT_BATCH_SIZE = 4
 
 
 @torch.inference_mode()
-def generate(prompt=None, max_len=512, temp=1.0, top_p=0.98, top_k=20,
+def generate(prompt=None, batch_size=1, max_len=512, temp=1.0, top_p=0.98, top_k=20,
              disable_patch_change=False, disable_control_change=False, disable_channels=None, generator=None):
     if disable_channels is not None:
         disable_channels = [tokenizer.parameter_ids["channel"][c] for c in disable_channels]
@@ -31,49 +33,69 @@ def generate(prompt=None, max_len=512, temp=1.0, top_p=0.98, top_k=20,
     if prompt is None:
         input_tensor = torch.full((1, max_token_seq), tokenizer.pad_id, dtype=torch.long, device=model.device)
         input_tensor[0, 0] = tokenizer.bos_id  # bos
+        input_tensor = input_tensor.unsqueeze(0)
+        input_tensor = torch.cat([input_tensor] * batch_size, dim=0)
     else:
-        prompt = prompt[:, :max_token_seq]
+        if len(prompt.shape) == 2:
+            prompt = prompt[None, :]
+            prompt = np.repeat(prompt, repeats=batch_size, axis=0)
+        elif prompt.shape[0] == 1:
+            prompt = np.repeat(prompt, repeats=batch_size, axis=0)
+        elif len(prompt.shape) != 3 or prompt.shape[0] != batch_size:
+            raise ValueError(f"invalid shape for prompt, {prompt.shape}")
+        prompt = prompt[..., :max_token_seq]
         if prompt.shape[-1] < max_token_seq:
-            prompt = np.pad(prompt, ((0, 0), (0, max_token_seq - prompt.shape[-1])),
+            prompt = np.pad(prompt, ((0, 0), (0, 0), (0, max_token_seq - prompt.shape[-1])),
                             mode="constant", constant_values=tokenizer.pad_id)
         input_tensor = torch.from_numpy(prompt).to(dtype=torch.long, device=model.device)
-    input_tensor = input_tensor.unsqueeze(0)
     cur_len = input_tensor.shape[1]
     bar = tqdm.tqdm(desc="generating", total=max_len - cur_len)
     with bar:
         while cur_len < max_len:
-            end = False
-            hidden = model.forward(input_tensor)[0, -1].unsqueeze(0)
+            end = [False] * batch_size
+            hidden = model.forward(input_tensor)[:, -1]
             next_token_seq = None
-            event_name = ""
+            event_names = [""] * batch_size
             for i in range(max_token_seq):
-                mask = torch.zeros(tokenizer.vocab_size, dtype=torch.int64, device=model.device)
-                if i == 0:
-                    mask_ids = list(tokenizer.event_ids.values()) + [tokenizer.eos_id]
-                    if disable_patch_change:
-                        mask_ids.remove(tokenizer.event_ids["patch_change"])
-                    if disable_control_change:
-                        mask_ids.remove(tokenizer.event_ids["control_change"])
-                    mask[mask_ids] = 1
-                else:
-                    param_name = tokenizer.events[event_name][i - 1]
-                    mask_ids = tokenizer.parameter_ids[param_name]
-                    if param_name == "channel":
-                        mask_ids = [i for i in mask_ids if i not in disable_channels]
-                    mask[mask_ids] = 1
+                mask = torch.zeros((batch_size, tokenizer.vocab_size), dtype=torch.int64, device=model.device)
+                for b in range(batch_size):
+                    if end[b]:
+                        mask[b, tokenizer.pad_id] = 1
+                        continue
+                    if i == 0:
+                        mask_ids = list(tokenizer.event_ids.values()) + [tokenizer.eos_id]
+                        if disable_patch_change:
+                            mask_ids.remove(tokenizer.event_ids["patch_change"])
+                        if disable_control_change:
+                            mask_ids.remove(tokenizer.event_ids["control_change"])
+                        mask[b, mask_ids] = 1
+                    else:
+                        param_names = tokenizer.events[event_names[b]]
+                        if i > len(param_names):
+                            mask[b, tokenizer.pad_id] = 1
+                            continue
+                        param_name = param_names[i - 1]
+                        mask_ids = tokenizer.parameter_ids[param_name]
+                        if param_name == "channel":
+                            mask_ids = [i for i in mask_ids if i not in disable_channels]
+                        mask[b, mask_ids] = 1
+                mask = mask.unsqueeze(1)
                 logits = model.forward_token(hidden, next_token_seq)[:, -1:]
                 scores = torch.softmax(logits / temp, dim=-1) * mask
-                sample = model.sample_top_p_k(scores, top_p, top_k, generator=generator)
+                samples = model.sample_top_p_k(scores, top_p, top_k, generator=generator)
                 if i == 0:
-                    next_token_seq = sample
-                    eid = sample.item()
-                    if eid == tokenizer.eos_id:
-                        end = True
-                        break
-                    event_name = tokenizer.id_events[eid]
+                    next_token_seq = samples
+                    for b in range(batch_size):
+                        if end[b]:
+                            continue
+                        eid = samples[b].item()
+                        if eid == tokenizer.eos_id:
+                            end[b] = True
+                        else:
+                            event_names[b] = tokenizer.id_events[eid]
                 else:
-                    next_token_seq = torch.cat([next_token_seq, sample], dim=1)
-                    if len(tokenizer.events[event_name]) == i:
+                    next_token_seq = torch.cat([next_token_seq, samples], dim=1)
+                    if all([len(tokenizer.events[event_names[b]]) == i for b in range(batch_size) if not end[b]]):
                         break
             if next_token_seq.shape[1] < max_token_seq:
                 next_token_seq = F.pad(next_token_seq, (0, max_token_seq - next_token_seq.shape[1]),
@@ -82,8 +104,8 @@ def generate(prompt=None, max_len=512, temp=1.0, top_p=0.98, top_k=20,
             input_tensor = torch.cat([input_tensor, next_token_seq], dim=1)
             cur_len += 1
             bar.update(1)
-            yield next_token_seq.reshape(-1).cpu().numpy()
-            if end:
+            yield next_token_seq[:, 0].cpu().numpy()
+            if all(end):
                 break
 
 
@@ -95,7 +117,8 @@ def send_msgs(msgs):
     return json.dumps(msgs)
 
 
-def run(tab, mid_seq, continuation_state, instruments, drum_kit, bpm, time_sig, key_sig, mid, midi_events,
+def run(tab, mid_seq, continuation_state, continuation_select, instruments, drum_kit, bpm, time_sig, key_sig, mid,
+        midi_events,
         reduce_cc_st, remap_track_channel, add_default_instr, remove_empty_channels, seed, seed_rand,
         gen_events, temp, top_p, top_k, allow_cc):
     bpm = int(bpm)
@@ -142,8 +165,8 @@ def run(tab, mid_seq, continuation_state, instruments, drum_kit, bpm, time_sig, 
             patches[9] = drum_kits2number[drum_kit]
         for i, (c, p) in enumerate(patches.items()):
             mid.append(tokenizer.event2tokens(["patch_change", 0, 0, i + 1, c, p]))
-        mid_seq = mid
-        mid = np.asarray(mid, dtype=np.int64)
+        mid = np.asarray([mid] * OUTPUT_BATCH_SIZE, dtype=np.int64)
+        mid_seq = mid.tolist()
         if len(instruments) > 0:
             disable_patch_change = True
             disable_channels = [i for i in range(16) if i not in patches]
@@ -153,84 +176,109 @@ def run(tab, mid_seq, continuation_state, instruments, drum_kit, bpm, time_sig, 
                                  remap_track_channel=remap_track_channel,
                                  add_default_instr=add_default_instr,
                                  remove_empty_channels=remove_empty_channels)
-        mid = np.asarray(mid, dtype=np.int64)
         mid = mid[:int(midi_events)]
-        mid_seq = []
-        for token_seq in mid:
-            mid_seq.append(token_seq.tolist())
+        mid = np.asarray([mid] * OUTPUT_BATCH_SIZE, dtype=np.int64)
+        mid_seq = mid.tolist()
     elif tab == 2 and mid_seq is not None:
-        continuation_state.append(len(mid_seq))
         mid = np.asarray(mid_seq, dtype=np.int64)
+        if continuation_select > 0:
+            continuation_state.append(mid_seq)
+            mid = np.repeat(mid[continuation_select - 1:continuation_select], repeats=OUTPUT_BATCH_SIZE, axis=0)
+            mid_seq = mid.tolist()
+        else:
+            continuation_state.append(mid.shape[1])
     else:
         continuation_state = [0]
-        mid_seq = []
-        mid = None
+        mid = [[tokenizer.bos_id] + [tokenizer.pad_id] * (tokenizer.max_token_seq - 1)]
+        mid = np.asarray([mid] * OUTPUT_BATCH_SIZE, dtype=np.int64)
+        mid_seq = mid.tolist()
 
     if mid is not None:
-        max_len += len(mid)
+        max_len += mid.shape[1]
 
-    events = [tokenizer.tokens2event(tokens) for tokens in mid_seq]
     init_msgs = [create_msg("progress", [0, gen_events])]
-    if tab != 2:
-        init_msgs += [create_msg("visualizer_clear", tokenizer.version),
-                     create_msg("visualizer_append", events)]
-    yield mid_seq, continuation_state, None, None, seed, send_msgs(init_msgs)
-    ctx = torch.amp.autocast(device_type=opt.device, dtype=torch.bfloat16, enabled=opt.device != "cpu")
-    with ctx:
-        midi_generator = generate(mid, max_len=max_len, temp=temp, top_p=top_p, top_k=top_k,
-                                  disable_patch_change=disable_patch_change, disable_control_change=not allow_cc,
-                                  disable_channels=disable_channels, generator=generator)
-        events = []
-        t = time.time()
-        for i, token_seq in enumerate(midi_generator):
-            token_seq = token_seq.tolist()
-            mid_seq.append(token_seq)
-            events.append(tokenizer.tokens2event(token_seq))
-            ct = time.time()
-            if ct - t > 0.2:
-                yield (mid_seq, continuation_state, None, None, seed,
-                       send_msgs([create_msg("visualizer_append", events),
-                                  create_msg("progress", [i + 1, gen_events])]))
-                t = ct
-                events = []
-
-    events = [tokenizer.tokens2event(tokens) for tokens in mid_seq]
-    mid = tokenizer.detokenize(mid_seq)
-    audio = synthesizer.synthesis(MIDI.score2opus(mid))
-    with open(f"output.mid", 'wb') as f:
-        f.write(MIDI.score2midi(mid))
-    end_msgs = [create_msg("visualizer_clear", tokenizer.version),
-                create_msg("visualizer_append", events),
-                create_msg("visualizer_end", None),
-                create_msg("progress", [0, 0])]
-    yield mid_seq, continuation_state, "output.mid", (44100, audio), seed, send_msgs(end_msgs)
+    if not (tab == 2 and continuation_select == 0):
+        for i in range(OUTPUT_BATCH_SIZE):
+            events = [tokenizer.tokens2event(tokens) for tokens in mid_seq[i]]
+            init_msgs += [create_msg("visualizer_clear", [i, tokenizer.version]),
+                          create_msg("visualizer_append", [i, events])]
+    yield mid_seq, continuation_state, seed, send_msgs(init_msgs)
+    midi_generator = generate(mid, batch_size=OUTPUT_BATCH_SIZE, max_len=max_len, temp=temp,
+                              top_p=top_p, top_k=top_k, disable_patch_change=disable_patch_change,
+                              disable_control_change=not allow_cc, disable_channels=disable_channels,
+                              generator=generator)
+    events = [list() for i in range(OUTPUT_BATCH_SIZE)]
+    t = time.time()
+    for i, token_seqs in enumerate(midi_generator):
+        token_seqs = token_seqs.tolist()
+        for j in range(OUTPUT_BATCH_SIZE):
+            token_seq = token_seqs[j]
+            mid_seq[j].append(token_seq)
+            events[j].append(tokenizer.tokens2event(token_seq))
+        if time.time() - t > 0.2:
+            msgs = [create_msg("progress", [i + 1, gen_events])]
+            for j in range(OUTPUT_BATCH_SIZE):
+                msgs += [create_msg("visualizer_append", [j, events[j]])]
+                events[j] = list()
+            yield mid_seq, continuation_state, seed, send_msgs(msgs)
+            t = time.time()
+    yield mid_seq, continuation_state, seed, send_msgs([])
 
 
-def cancel_run(mid_seq):
+def finish_run(mid_seq):
     if mid_seq is None:
-        return None, None, send_msgs([])
-    events = [tokenizer.tokens2event(tokens) for tokens in mid_seq]
-    mid = tokenizer.detokenize(mid_seq)
-    audio = synthesizer.synthesis(MIDI.score2opus(mid))
-    with open(f"output.mid", 'wb') as f:
-        f.write(MIDI.score2midi(mid))
-    end_msgs = [create_msg("visualizer_clear", tokenizer.version),
-                create_msg("visualizer_append", events),
-                create_msg("visualizer_end", None),
-                create_msg("progress", [0, 0])]
-    return "output.mid", (44100, audio), send_msgs(end_msgs)
+        outputs = [None] * OUTPUT_BATCH_SIZE
+        return *outputs, []
+    outputs = []
+    end_msgs = [create_msg("progress", [0, 0])]
+    if not os.path.exists("outputs"):
+        os.mkdir("outputs")
+    for i in range(OUTPUT_BATCH_SIZE):
+        events = [tokenizer.tokens2event(tokens) for tokens in mid_seq[i]]
+        mid = tokenizer.detokenize(mid_seq[i])
+        with open(f"outputs/output{i + 1}.mid", 'wb') as f:
+            f.write(MIDI.score2midi(mid))
+        outputs.append(f"outputs/output{i + 1}.mid")
+        end_msgs += [create_msg("visualizer_clear", [i, tokenizer.version]),
+                     create_msg("visualizer_append", [i, events]),
+                     create_msg("visualizer_end", i)]
+    return *outputs, send_msgs(end_msgs)
+
+
+def synthesis_task(mid):
+    return synthesizer.synthesis(MIDI.score2opus(mid))
+
+def render_audio(mid_seq, should_render_audio):
+    if (not should_render_audio) or mid_seq is None:
+        outputs = [None] * OUTPUT_BATCH_SIZE
+        return tuple(outputs)
+    outputs = []
+    if not os.path.exists("outputs"):
+        os.mkdir("outputs")
+    audio_futures = []
+    for i in range(OUTPUT_BATCH_SIZE):
+        mid = tokenizer.detokenize(mid_seq[i])
+        audio_future = thread_pool.submit(synthesis_task, mid)
+        audio_futures.append(audio_future)
+    for future in audio_futures:
+        outputs.append((44100, future.result()))
+    return tuple(outputs)
 
 
 def undo_continuation(mid_seq, continuation_state):
     if mid_seq is None or len(continuation_state) < 2:
         return mid_seq, continuation_state, send_msgs([])
-    mid_seq = mid_seq[:continuation_state[-1]]
+    if isinstance(continuation_state[-1], list):
+        mid_seq = continuation_state[-1]
+    else:
+        mid_seq = [ms[:continuation_state[-1]] for ms in mid_seq]
     continuation_state = continuation_state[:-1]
-    events = [tokenizer.tokens2event(tokens) for tokens in mid_seq]
-    end_msgs = [create_msg("visualizer_clear", tokenizer.version),
-                create_msg("visualizer_append", events),
-                create_msg("visualizer_end", None),
-                create_msg("progress", [0, 0])]
+    end_msgs = [create_msg("progress", [0, 0])]
+    for i in range(OUTPUT_BATCH_SIZE):
+        events = [tokenizer.tokens2event(tokens) for tokens in mid_seq[i]]
+        end_msgs += [create_msg("visualizer_clear", [i, tokenizer.version]),
+                     create_msg("visualizer_append", [i, events]),
+                     create_msg("visualizer_end", i)]
     return mid_seq, continuation_state, send_msgs(end_msgs)
 
 
@@ -283,6 +331,7 @@ if __name__ == "__main__":
     opt = parser.parse_args()
     soundfont_path = hf_hub_download(repo_id="skytnt/midi-model", filename="soundfont.sf2")
     synthesizer = MidiSynthesizer(soundfont_path)
+    thread_pool = ThreadPoolExecutor(max_workers=OUTPUT_BATCH_SIZE)
     tokenizer: Union[MIDITokenizerV1, MIDITokenizerV2, None] = None
     model: Optional[MIDIModel] = None
 
@@ -319,15 +368,15 @@ if __name__ == "__main__":
                                       step=1,
                                       value=0)
                 input_time_sig = gr.Radio(label="time signature (only for tv2 models)",
-                                             value="auto",
-                                             choices=["auto", "4/4", "2/4", "3/4", "6/4", "7/4",
-                                                      "2/2", "3/2", "4/2", "3/8", "5/8", "6/8", "7/8", "9/8", "12/8"]
-                                             )
+                                          value="auto",
+                                          choices=["auto", "4/4", "2/4", "3/4", "6/4", "7/4",
+                                                   "2/2", "3/2", "4/2", "3/8", "5/8", "6/8", "7/8", "9/8", "12/8"]
+                                          )
                 input_key_sig = gr.Radio(label="key signature (only for tv2 models)",
-                                            value="auto",
-                                            choices=["auto"] + key_signatures,
-                                            type="index"
-                                            )
+                                         value="auto",
+                                         choices=["auto"] + key_signatures,
+                                         type="index"
+                                         )
                 example1 = gr.Examples([
                     [[], "None"],
                     [["Acoustic Grand"], "None"],
@@ -354,7 +403,11 @@ if __name__ == "__main__":
                     label="add a default instrument to channels that don't have an instrument", value=True)
                 input_remove_empty_channels = gr.Checkbox(label="remove channels without notes", value=False)
             with gr.TabItem("last output prompt") as tab3:
-                gr.Markdown("Continue generating on the last output. Just click the generate button")
+                gr.Markdown("Continue generating on the last output.")
+                input_continuation_select = gr.Radio(label="select output to continue generating", value="all",
+                                               choices=["all"] + [f"output{i + 1}" for i in range(OUTPUT_BATCH_SIZE)],
+                                               type="index"
+                                               )
                 undo_btn = gr.Button("undo the last continuation")
 
         tab1.select(lambda: 0, None, tab_select, queue=False)
@@ -370,26 +423,42 @@ if __name__ == "__main__":
             input_top_p = gr.Slider(label="top p", minimum=0.1, maximum=1, step=0.01, value=0.98)
             input_top_k = gr.Slider(label="top k", minimum=1, maximum=128, step=1, value=12)
             input_allow_cc = gr.Checkbox(label="allow midi cc event", value=True)
+            input_render_audio = gr.Checkbox(label="render audio after generation", value=True)
             example3 = gr.Examples([[1, 0.93, 128], [1, 0.98, 20], [1, 0.98, 12]],
                                    [input_temp, input_top_p, input_top_k])
         run_btn = gr.Button("generate", variant="primary")
         stop_btn = gr.Button("stop and output")
         output_midi_seq = gr.State()
         output_continuation_state = gr.State([0])
-        output_midi_visualizer = gr.HTML(elem_id="midi_visualizer_container")
-        output_audio = gr.Audio(label="output audio", format="mp3", elem_id="midi_audio")
-        output_midi = gr.File(label="output midi", file_types=[".mid"])
-        run_event = run_btn.click(run, [tab_select, output_midi_seq, output_continuation_state, input_instruments,
-                                        input_drum_kit, input_bpm,  input_time_sig, input_key_sig, input_midi,
-                                        input_midi_events, input_reduce_cc_st, input_remap_track_channel,
-                                        input_add_default_instr, input_remove_empty_channels, input_seed,
-                                        input_seed_rand, input_gen_events, input_temp, input_top_p, input_top_k,
-                                        input_allow_cc],
-                                  [output_midi_seq, output_continuation_state,
-                                   output_midi, output_audio, input_seed, js_msg],
-                                  concurrency_limit=3)
-        stop_btn.click(cancel_run, [output_midi_seq], [output_midi, output_audio, js_msg], cancels=run_event,
-                       queue=False)
+        midi_outputs = []
+        audio_outputs = []
+        with gr.Tabs(elem_id="output_tabs"):
+            for i in range(OUTPUT_BATCH_SIZE):
+                with gr.TabItem(f"output {i + 1}") as tab1:
+                    output_midi_visualizer = gr.HTML(elem_id=f"midi_visualizer_container_{i}")
+                    output_audio = gr.Audio(label="output audio", format="mp3", elem_id=f"midi_audio_{i}")
+                    output_midi = gr.File(label="output midi", file_types=[".mid"])
+                    midi_outputs.append(output_midi)
+                    audio_outputs.append(output_audio)
+        run_event = run_btn.click(run, [tab_select, output_midi_seq, output_continuation_state,
+                                        input_continuation_select, input_instruments, input_drum_kit, input_bpm,
+                                        input_time_sig, input_key_sig, input_midi, input_midi_events,
+                                        input_reduce_cc_st, input_remap_track_channel,
+                                        input_add_default_instr, input_remove_empty_channels,
+                                        input_seed, input_seed_rand, input_gen_events, input_temp, input_top_p,
+                                        input_top_k, input_allow_cc],
+                                  [output_midi_seq, output_continuation_state, input_seed, js_msg],
+                                  concurrency_limit=10, queue=True)
+        finish_run_event = run_event.then(fn=finish_run,
+                                          inputs=[output_midi_seq],
+                                          outputs=midi_outputs + [js_msg],
+                                          queue=False)
+        finish_run_event.then(fn=render_audio,
+                              inputs=[output_midi_seq, input_render_audio],
+                              outputs=audio_outputs,
+                              queue=False)
+        stop_btn.click(None, [], [], cancels=run_event, queue=False)
         undo_btn.click(undo_continuation, [output_midi_seq, output_continuation_state],
-                            [output_midi_seq, output_continuation_state, js_msg], queue=False)
+                       [output_midi_seq, output_continuation_state, js_msg], queue=False)
     app.launch(server_port=opt.port, inbrowser=True, share=opt.share)
+    thread_pool.shutdown()

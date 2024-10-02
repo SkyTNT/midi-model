@@ -115,14 +115,22 @@ class MIDIModel(pl.LightningModule):
         if prompt is None:
             input_tensor = torch.full((1, max_token_seq), tokenizer.pad_id, dtype=torch.long, device=self.device)
             input_tensor[0, 0] = tokenizer.bos_id  # bos
+            input_tensor = input_tensor.unsqueeze(0)
+            input_tensor = torch.cat([input_tensor] * batch_size, dim=0)
         else:
-            prompt = prompt[:, :max_token_seq]
+            if len(prompt.shape) == 2:
+                prompt = prompt[None, :]
+                prompt = np.repeat(prompt, repeats=batch_size, axis=0)
+            elif prompt.shape[0] == 1:
+                prompt = np.repeat(prompt, repeats=batch_size, axis=0)
+            elif len(prompt.shape) != 3 or prompt.shape[0] != batch_size:
+                raise ValueError(f"invalid shape for prompt, {prompt.shape}")
+            prompt = prompt[..., :max_token_seq]
             if prompt.shape[-1] < max_token_seq:
-                prompt = np.pad(prompt, ((0, 0), (0, max_token_seq - prompt.shape[-1])),
+                prompt = np.pad(prompt, ((0, 0), (0, 0), (0, max_token_seq - prompt.shape[-1])),
                                 mode="constant", constant_values=tokenizer.pad_id)
             input_tensor = torch.from_numpy(prompt).to(dtype=torch.long, device=self.device)
-        input_tensor = input_tensor.unsqueeze(0)
-        input_tensor = torch.cat([input_tensor]*batch_size, dim=0)
+
         cur_len = input_tensor.shape[1]
         bar = tqdm.tqdm(desc="generating", total=max_len - cur_len)
         with bar:
@@ -168,8 +176,7 @@ class MIDIModel(pl.LightningModule):
                     next_token_seq = F.pad(next_token_seq, (0, max_token_seq - next_token_seq.shape[1]),
                                            "constant", value=tokenizer.pad_id)
                 next_token_seq = next_token_seq.unsqueeze(1)
-                input_tensor = torch.cat([input_tensor, next_token_seq],
-                                         dim=1)
+                input_tensor = torch.cat([input_tensor, next_token_seq], dim=1)
                 cur_len += 1
                 bar.update(1)
 

@@ -1,3 +1,5 @@
+const MIDI_OUTPUT_BATCH_SIZE=4;
+
 /**
  * 自动绕过 shadowRoot 的 querySelector
  * @param {string} selector - 要查询的 CSS 选择器
@@ -594,33 +596,49 @@ class MidiVisualizer extends HTMLElement{
 customElements.define('midi-visualizer', MidiVisualizer);
 
 (()=>{
-    let midi_visualizer_container_inited = null
-    let midi_audio_audio_inited = null;
-    let midi_audio_cursor_inited = null;
-    let midi_visualizer = document.createElement('midi-visualizer')
-    onUiUpdate((m)=>{
-        let app = gradioApp()
-        let midi_visualizer_container = app.querySelector("#midi_visualizer_container");
-        if(!!midi_visualizer_container && midi_visualizer_container_inited!== midi_visualizer_container){
-            midi_visualizer_container.appendChild(midi_visualizer)
-            midi_visualizer_container_inited = midi_visualizer_container;
-        }
-        let midi_audio = app.querySelector("#midi_audio");
-        if (!!midi_audio){
-            let midi_audio_cursor = midi_audio.deepQuerySelector(".cursor");
-            if(!!midi_audio_cursor && midi_audio_cursor_inited!==midi_audio_cursor){
-                midi_visualizer.bindWaveformCursor(midi_audio_cursor)
-                midi_audio_cursor_inited = midi_audio_cursor
+    function midi_visualizer_setup(idx, midi_visualizer){
+        let midi_visualizer_container_inited = null
+        let midi_audio_audio_inited = null;
+        let midi_audio_cursor_inited = null;
+        onUiUpdate((m)=>{
+            let app = gradioApp()
+            let midi_visualizer_container = app.querySelector(`#midi_visualizer_container_${idx}`);
+            if(!!midi_visualizer_container && midi_visualizer_container_inited!== midi_visualizer_container){
+                midi_visualizer_container.appendChild(midi_visualizer)
+                midi_visualizer_container_inited = midi_visualizer_container;
             }
-            let midi_audio_audio = midi_audio.deepQuerySelector("audio");
-            if(!!midi_audio_audio && midi_audio_audio_inited!==midi_audio_audio){
-                midi_visualizer.bindAudioPlayer(midi_audio_audio)
-                midi_audio_audio_inited = midi_audio_audio
+            let midi_audio = app.querySelector(`#midi_audio_${idx}`);
+            if (!!midi_audio){
+                let midi_audio_cursor = midi_audio.deepQuerySelector(".cursor");
+                if(!!midi_audio_cursor && midi_audio_cursor_inited!==midi_audio_cursor){
+                    midi_visualizer.bindWaveformCursor(midi_audio_cursor)
+                    midi_audio_cursor_inited = midi_audio_cursor
+                }
+                let midi_audio_audio = midi_audio.deepQuerySelector("audio");
+                if(!!midi_audio_audio && midi_audio_audio_inited!==midi_audio_audio){
+                    midi_visualizer.bindAudioPlayer(midi_audio_audio)
+                    midi_audio_audio_inited = midi_audio_audio
+                }
             }
-        }
-    })
+        });
+    }
+
+    let midi_visualizers = []
+    for (let i = 0; i < MIDI_OUTPUT_BATCH_SIZE ; i++){
+        let midi_visualizer = document.createElement('midi-visualizer');
+        midi_visualizers.push(midi_visualizer);
+        midi_visualizer_setup(i, midi_visualizer)
+    }
 
     let hasProgressBar = false;
+    let output_tabs_inited = null;
+    onUiUpdate((m)=>{
+        let app = gradioApp()
+        let output_tabs = app.querySelector("#output_tabs");
+        if(!!output_tabs && output_tabs_inited!== output_tabs){
+            output_tabs_inited = output_tabs;
+        }
+    });
 
     function createProgressBar(progressbarContainer){
         let parentProgressbar = progressbarContainer.parentNode;
@@ -653,15 +671,15 @@ customElements.define('midi-visualizer', MidiVisualizer);
         hasProgressBar = false;
     }
 
-    function setProgressBar(progressbarContainer, progress, total){
+    function setProgressBar(progress, total){
         if (!hasProgressBar)
-            createProgressBar(midi_visualizer_container_inited)
+            createProgressBar(output_tabs_inited)
         if (hasProgressBar && total === 0){
-            removeProgressBar(midi_visualizer_container_inited)
+            removeProgressBar(output_tabs_inited)
             return
         }
-        let parentProgressbar = progressbarContainer.parentNode;
-        let divProgress = parentProgressbar.querySelector(".progressDiv");
+        let parentProgressbar = output_tabs_inited.parentNode;
+        // let divProgress = parentProgressbar.querySelector(".progressDiv");
         let divInner = parentProgressbar.querySelector(".progress");
         if(total===0)
             total = 1;
@@ -679,24 +697,30 @@ customElements.define('midi-visualizer', MidiVisualizer);
         }
     })
     function handleMsg(msg){
+        let idx;
         switch (msg.name) {
             case "visualizer_clear":
-                midi_visualizer.clearMidiEvents(false);
-                midi_visualizer.version = msg.data
+                idx = msg.data[0];
+                let ver = msg.data[1];
+                midi_visualizers[idx].clearMidiEvents(false);
+                midi_visualizers[idx].version = ver;
                 break;
             case "visualizer_append":
-                msg.data.forEach( value => {
-                    midi_visualizer.appendMidiEvent(value);
+                idx = msg.data[0];
+                let events = msg.data[1];
+                events.forEach( value => {
+                    midi_visualizers[idx].appendMidiEvent(value);
                 })
                 break;
             case "visualizer_end":
-                midi_visualizer.finishAppendMidiEvent()
-                midi_visualizer.setPlayTime(0);
+                idx = msg.data;
+                midi_visualizers[idx].finishAppendMidiEvent()
+                midi_visualizers[idx].setPlayTime(0);
                 break;
             case "progress":
                 let progress = msg.data[0]
                 let total = msg.data[1]
-                setProgressBar(midi_visualizer_container_inited, progress, total)
+                setProgressBar(progress, total)
                 break;
             default:
         }

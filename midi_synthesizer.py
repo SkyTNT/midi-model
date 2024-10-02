@@ -1,3 +1,5 @@
+from threading import Lock
+
 import fluidsynth
 import numpy as np
 
@@ -9,14 +11,16 @@ class MidiSynthesizer:
         fl = fluidsynth.Synth(samplerate=float(sample_rate))
         sfid = fl.sfload(soundfont_path)
         self.devices = [[fl, sfid, False]]
+        self.file_lock = Lock()
 
     def get_fluidsynth(self):
         for device in self.devices:
             if not device[2]:
                 device[2] = True
                 return device
-        fl = fluidsynth.Synth(samplerate=float(self.sample_rate))
-        sfid = fl.sfload(self.soundfont_path)
+        with self.file_lock:
+            fl = fluidsynth.Synth(samplerate=float(self.sample_rate))
+            sfid = fl.sfload(self.soundfont_path)
         device = [fl, sfid, True]
         self.devices.append(device)
         return device
