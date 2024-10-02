@@ -143,6 +143,21 @@ class TrainMIDIModel(MIDIModel):
             }
         }
 
+    def compute_accuracy(self, logits, labels):
+        out = torch.argmax(logits, dim=-1)
+        out = out.flatten()
+        labels = labels.flatten()
+
+        mask = (labels != self.tokenizer.pad_id)
+        out = out[mask]
+        labels = labels[mask]
+
+        num_right = (out == labels)
+        num_right = torch.sum(num_right).type(torch.float32)
+        acc = num_right / len(labels)
+
+        return acc
+
     def training_step(self, batch, batch_idx):
         x = batch[:, :-1].contiguous()  # (batch_size, midi_sequence_length, token_sequence_length)
         y = batch[:, 1:].contiguous()
@@ -179,7 +194,8 @@ class TrainMIDIModel(MIDIModel):
             reduction="mean",
             ignore_index=self.tokenizer.pad_id
         )
-        self.log("val/loss", loss, sync_dist=True)
+        acc = self.compute_accuracy(logits, y)
+        self.log_dict({"val/loss": loss, "val/acc": acc}, sync_dist=True)
         return loss
 
     def on_validation_start(self):
