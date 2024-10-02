@@ -102,7 +102,8 @@ def get_linear_schedule_with_warmup(optimizer, num_warmup_steps, num_training_st
 
 class TrainMIDIModel(MIDIModel):
     def __init__(self, config: MIDIModelConfig, flash=False,
-                 lr=2e-4, weight_decay=0.01, warmup=1e3, max_step=1e6, sample_seq=False, gen_example=True):
+                 lr=2e-4, weight_decay=0.01, warmup=1e3, max_step=1e6, sample_seq=False,
+                 gen_example=True, example_batch=8):
         super(TrainMIDIModel, self).__init__(config, flash=flash)
         self.lr = lr
         self.weight_decay = weight_decay
@@ -110,6 +111,7 @@ class TrainMIDIModel(MIDIModel):
         self.max_step = max_step
         self.sample_seq = sample_seq
         self.gen_example = gen_example
+        self.example_batch = example_batch
 
     def configure_optimizers(self):
         param_optimizer = list(self.named_parameters())
@@ -202,33 +204,36 @@ class TrainMIDIModel(MIDIModel):
         torch.cuda.empty_cache()
 
     def on_validation_end(self):
-        torch.cuda.synchronize()
         @rank_zero_only
         def gen_example():
-            mid = self.generate()
-            mid = self.tokenizer.detokenize(mid)
-            img = self.tokenizer.midi2img(mid)
-            img.save(f"sample/{self.global_step}_0.png")
-            with open(f"sample/{self.global_step}_0.mid", 'wb') as f:
-                f.write(MIDI.score2midi(mid))
+            base_dir = f"sample/{self.global_step}"
+            if not os.path.exists(base_dir):
+                os.mkdir(base_dir)
+            midis = self.generate(batch_size=self.example_batch)
+            midis = [self.tokenizer.detokenize(midi) for midi in midis]
+            imgs = [self.tokenizer.midi2img(midi) for midi in midis]
+            for i, (img, midi) in enumerate(zip(imgs, midis)):
+                img.save(f"{base_dir}/0_{i}.png")
+                with open(f"{base_dir}/0_{i}.mid", 'wb') as f:
+                    f.write(MIDI.score2midi(midi))
             prompt = val_dataset.load_midi(random.randint(0, len(val_dataset) - 1))
             prompt = np.asarray(prompt, dtype=np.int16)
             ori = prompt[:512]
-            prompt = prompt[:256].astype(np.int64)
-            mid = self.generate(prompt)
-            mid = self.tokenizer.detokenize(mid)
-            img = self.tokenizer.midi2img(mid)
-            img.save(f"sample/{self.global_step}_1.png")
             img = self.tokenizer.midi2img(self.tokenizer.detokenize(ori))
-            img.save(f"sample/{self.global_step}_1_ori.png")
-            with open(f"sample/{self.global_step}_1.mid", 'wb') as f:
-                f.write(MIDI.score2midi(mid))
+            img.save(f"{base_dir}/1_ori.png")
+            prompt = prompt[:256].astype(np.int64)
+            midis = self.generate(prompt, batch_size=self.example_batch)
+            midis = [self.tokenizer.detokenize(midi) for midi in midis]
+            imgs = [self.tokenizer.midi2img(midi) for midi in midis]
+            for i, (img, midi) in enumerate(zip(imgs, midis)):
+                img.save(f"{base_dir}/1_{i}.png")
+                with open(f"{base_dir}/1_{i}.mid", 'wb') as f:
+                    f.write(MIDI.score2midi(midi))
         if self.gen_example:
             try:
                 gen_example()
             except Exception as e:
                 print(e)
-        torch.cuda.synchronize()
         torch.cuda.empty_cache()
 
 
@@ -295,6 +300,9 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         "--batch-size-val", type=int, default=2, help="batch size for val"
+    )
+    parser.add_argument(
+        "--batch-size-gen-example", type=int, default=8, help="batch size for generate example"
     )
     parser.add_argument(
         "--workers-train",
@@ -377,7 +385,8 @@ if __name__ == '__main__':
     print(f"train: {len(train_dataset)}  val: {len(val_dataset)}")
     model = TrainMIDIModel(config, flash=True, lr=opt.lr, weight_decay=opt.weight_decay,
                            warmup=opt.warmup_step, max_step=opt.max_step,
-                           sample_seq=opt.sample_seq, gen_example=not opt.disable_gen_example)
+                           sample_seq=opt.sample_seq, gen_example=not opt.disable_gen_example,
+                           example_batch=opt.batch_size_gen_example)
     if opt.ckpt:
         ckpt = torch.load(opt.ckpt, map_location="cpu")
         state_dict = ckpt.get("state_dict", ckpt)

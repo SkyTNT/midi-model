@@ -109,7 +109,7 @@ class MIDIModel(pl.LightningModule):
         return next_token
 
     @torch.inference_mode()
-    def generate(self, prompt=None, max_len=512, temp=1.0, top_p=0.98, top_k=20, generator=None):
+    def generate(self, prompt=None, batch_size=1, max_len=512, temp=1.0, top_p=0.98, top_k=20, generator=None):
         tokenizer = self.tokenizer
         max_token_seq = tokenizer.max_token_seq
         if prompt is None:
@@ -122,43 +122,57 @@ class MIDIModel(pl.LightningModule):
                                 mode="constant", constant_values=tokenizer.pad_id)
             input_tensor = torch.from_numpy(prompt).to(dtype=torch.long, device=self.device)
         input_tensor = input_tensor.unsqueeze(0)
+        input_tensor = torch.cat([input_tensor]*batch_size, dim=0)
         cur_len = input_tensor.shape[1]
         bar = tqdm.tqdm(desc="generating", total=max_len - cur_len)
         with bar:
             while cur_len < max_len:
-                end = False
-                hidden = self.forward(input_tensor)[0, -1].unsqueeze(0)
+                end = [False] * batch_size
+                hidden = self.forward(input_tensor)[:, -1]
                 next_token_seq = None
-                event_name = ""
+                event_names = [""] * batch_size
                 for i in range(max_token_seq):
-                    mask = torch.zeros(tokenizer.vocab_size, dtype=torch.int64, device=self.device)
-                    if i == 0:
-                        mask[list(tokenizer.event_ids.values()) + [tokenizer.eos_id]] = 1
-                    else:
-                        param_name = tokenizer.events[event_name][i - 1]
-                        mask[tokenizer.parameter_ids[param_name]] = 1
-
+                    mask = torch.zeros((batch_size, tokenizer.vocab_size), dtype=torch.int64, device=self.device)
+                    for b in range(batch_size):
+                        if end[b]:
+                            mask[b, tokenizer.pad_id] = 1
+                            continue
+                        if i == 0:
+                            mask[b, list(tokenizer.event_ids.values()) + [tokenizer.eos_id]] = 1
+                        else:
+                            param_names = tokenizer.events[event_names[b]]
+                            if i > len(param_names):
+                                mask[b, tokenizer.pad_id] = 1
+                                continue
+                            mask[b, tokenizer.parameter_ids[param_names[i - 1]]] = 1
+                    mask = mask.unsqueeze(1)
                     logits = self.forward_token(hidden, next_token_seq)[:, -1:]
                     scores = torch.softmax(logits / temp, dim=-1) * mask
-                    sample = self.sample_top_p_k(scores, top_p, top_k, generator=generator)
+                    samples = self.sample_top_p_k(scores, top_p, top_k, generator=generator)
                     if i == 0:
-                        next_token_seq = sample
-                        eid = sample.item()
-                        if eid == tokenizer.eos_id:
-                            end = True
-                            break
-                        event_name = tokenizer.id_events[eid]
+                        next_token_seq = samples
+                        for b in range(batch_size):
+                            if end[b]:
+                                continue
+                            eid = samples[b].item()
+                            if eid == tokenizer.eos_id:
+                                end[b] = True
+                            else:
+                                event_names[b] = tokenizer.id_events[eid]
                     else:
-                        next_token_seq = torch.cat([next_token_seq, sample], dim=1)
-                        if len(tokenizer.events[event_name]) == i:
+                        next_token_seq = torch.cat([next_token_seq, samples], dim=1)
+                        if all([len(tokenizer.events[event_names[b]]) == i for b in range(batch_size) if not end[b]]):
                             break
+
                 if next_token_seq.shape[1] < max_token_seq:
                     next_token_seq = F.pad(next_token_seq, (0, max_token_seq - next_token_seq.shape[1]),
                                            "constant", value=tokenizer.pad_id)
                 next_token_seq = next_token_seq.unsqueeze(1)
-                input_tensor = torch.cat([input_tensor, next_token_seq], dim=1)
+                input_tensor = torch.cat([input_tensor, next_token_seq],
+                                         dim=1)
                 cur_len += 1
                 bar.update(1)
-                if end:
+
+                if all(end):
                     break
-        return input_tensor[0].cpu().numpy()
+        return input_tensor.cpu().numpy()
