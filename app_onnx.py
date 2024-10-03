@@ -3,6 +3,7 @@ import glob
 import json
 import os.path
 import time
+from concurrent.futures import ThreadPoolExecutor
 from sys import exit
 
 import gradio as gr
@@ -44,8 +45,9 @@ def sample_top_p_k(probs, p, k, generator=None):
     return next_token
 
 
-def generate(model, prompt=None, max_len=512, temp=1.0, top_p=0.98, top_k=20,
+def generate(model, prompt=None, batch_size=1, max_len=512, temp=1.0, top_p=0.98, top_k=20,
              disable_patch_change=False, disable_control_change=False, disable_channels=None, generator=None):
+    tokenizer = model[2]
     if disable_channels is not None:
         disable_channels = [tokenizer.parameter_ids["channel"][c] for c in disable_channels]
     else:
@@ -56,59 +58,80 @@ def generate(model, prompt=None, max_len=512, temp=1.0, top_p=0.98, top_k=20,
     if prompt is None:
         input_tensor = np.full((1, max_token_seq), tokenizer.pad_id, dtype=np.int64)
         input_tensor[0, 0] = tokenizer.bos_id  # bos
+        input_tensor = input_tensor[None, :, :]
+        input_tensor = np.repeat(input_tensor, repeats=batch_size, axis=0)
     else:
-        prompt = prompt[:, :max_token_seq]
+        if len(prompt.shape) == 2:
+            prompt = prompt[None, :]
+            prompt = np.repeat(prompt, repeats=batch_size, axis=0)
+        elif prompt.shape[0] == 1:
+            prompt = np.repeat(prompt, repeats=batch_size, axis=0)
+        elif len(prompt.shape) != 3 or prompt.shape[0] != batch_size:
+            raise ValueError(f"invalid shape for prompt, {prompt.shape}")
+        prompt = prompt[..., :max_token_seq]
         if prompt.shape[-1] < max_token_seq:
-            prompt = np.pad(prompt, ((0, 0), (0, max_token_seq - prompt.shape[-1])),
+            prompt = np.pad(prompt, ((0, 0), (0, 0), (0, max_token_seq - prompt.shape[-1])),
                             mode="constant", constant_values=tokenizer.pad_id)
         input_tensor = prompt
-    input_tensor = input_tensor[None, :, :]
     cur_len = input_tensor.shape[1]
     bar = tqdm.tqdm(desc="generating", total=max_len - cur_len)
     with bar:
         while cur_len < max_len:
-            end = False
+            end = [False] * batch_size
             hidden = model[0].run(None, {'x': input_tensor})[0][:, -1]
-            next_token_seq = np.empty((1, 0), dtype=np.int64)
-            event_name = ""
+            next_token_seq = np.empty((batch_size, 0), dtype=np.int64)
+            event_names = [""] * batch_size
             for i in range(max_token_seq):
-                mask = np.zeros(tokenizer.vocab_size, dtype=np.int64)
-                if i == 0:
-                    mask_ids = list(tokenizer.event_ids.values()) + [tokenizer.eos_id]
-                    if disable_patch_change:
-                        mask_ids.remove(tokenizer.event_ids["patch_change"])
-                    if disable_control_change:
-                        mask_ids.remove(tokenizer.event_ids["control_change"])
-                    mask[mask_ids] = 1
-                else:
-                    param_name = tokenizer.events[event_name][i - 1]
-                    mask_ids = tokenizer.parameter_ids[param_name]
-                    if param_name == "channel":
-                        mask_ids = [i for i in mask_ids if i not in disable_channels]
-                    mask[mask_ids] = 1
+                mask = np.zeros((batch_size, tokenizer.vocab_size), dtype=np.int64)
+                for b in range(batch_size):
+                    if end[b]:
+                        mask[b, tokenizer.pad_id] = 1
+                        continue
+                    if i == 0:
+                        mask_ids = list(tokenizer.event_ids.values()) + [tokenizer.eos_id]
+                        if disable_patch_change:
+                            mask_ids.remove(tokenizer.event_ids["patch_change"])
+                        if disable_control_change:
+                            mask_ids.remove(tokenizer.event_ids["control_change"])
+                        mask[b, mask_ids] = 1
+                    else:
+                        param_names = tokenizer.events[event_names[b]]
+                        if i > len(param_names):
+                            mask[b, tokenizer.pad_id] = 1
+                            continue
+                        param_name = param_names[i - 1]
+                        mask_ids = tokenizer.parameter_ids[param_name]
+                        if param_name == "channel":
+                            mask_ids = [i for i in mask_ids if i not in disable_channels]
+                        mask[b, mask_ids] = 1
+                mask = mask[:, None, :]
                 logits = model[1].run(None, {'x': next_token_seq, "hidden": hidden})[0][:, -1:]
                 scores = softmax(logits / temp, -1) * mask
-                sample = sample_top_p_k(scores, top_p, top_k, generator)
+                samples = sample_top_p_k(scores, top_p, top_k, generator)
                 if i == 0:
-                    next_token_seq = sample
-                    eid = sample.item()
-                    if eid == tokenizer.eos_id:
-                        end = True
-                        break
-                    event_name = tokenizer.id_events[eid]
+                    next_token_seq = samples
+                    for b in range(batch_size):
+                        if end[b]:
+                            continue
+                        eid = samples[b].item()
+                        if eid == tokenizer.eos_id:
+                            end[b] = True
+                        else:
+                            event_names[b] = tokenizer.id_events[eid]
                 else:
-                    next_token_seq = np.concatenate([next_token_seq, sample], axis=1)
-                    if len(tokenizer.events[event_name]) == i:
+                    next_token_seq = np.concatenate([next_token_seq, samples], axis=1)
+                    if all([len(tokenizer.events[event_names[b]]) == i for b in range(batch_size) if not end[b]]):
                         break
             if next_token_seq.shape[1] < max_token_seq:
-                next_token_seq = np.pad(next_token_seq, ((0, 0), (0, max_token_seq - next_token_seq.shape[-1])),
+                next_token_seq = np.pad(next_token_seq,
+                                        ((0, 0), (0, max_token_seq - next_token_seq.shape[-1])),
                                         mode="constant", constant_values=tokenizer.pad_id)
-            next_token_seq = next_token_seq[None, :, :]
+            next_token_seq = next_token_seq[:, None, :]
             input_tensor = np.concatenate([input_tensor, next_token_seq], axis=1)
             cur_len += 1
             bar.update(1)
-            yield next_token_seq.reshape(-1)
-            if end:
+            yield next_token_seq[:, 0]
+            if all(end):
                 break
 
 
@@ -120,8 +143,8 @@ def send_msgs(msgs):
     return json.dumps(msgs)
 
 
-def run(tab, mid_seq, continuation_state, instruments, drum_kit, bpm, time_sig, key_sig, mid, midi_events,
-        reduce_cc_st, remap_track_channel, add_default_instr, remove_empty_channels, seed, seed_rand,
+def run(tab, mid_seq, continuation_state, continuation_select, instruments, drum_kit, bpm, time_sig, key_sig, mid,
+        midi_events, reduce_cc_st, remap_track_channel, add_default_instr, remove_empty_channels, seed, seed_rand,
         gen_events, temp, top_p, top_k, allow_cc):
     bpm = int(bpm)
     if time_sig == "auto":
@@ -167,8 +190,8 @@ def run(tab, mid_seq, continuation_state, instruments, drum_kit, bpm, time_sig, 
             patches[9] = drum_kits2number[drum_kit]
         for i, (c, p) in enumerate(patches.items()):
             mid.append(tokenizer.event2tokens(["patch_change", 0, 0, i + 1, c, p]))
-        mid_seq = mid
-        mid = np.asarray(mid, dtype=np.int64)
+        mid = np.asarray([mid] * OUTPUT_BATCH_SIZE, dtype=np.int64)
+        mid_seq = mid.tolist()
         if len(instruments) > 0:
             disable_patch_change = True
             disable_channels = [i for i in range(16) if i not in patches]
@@ -178,83 +201,110 @@ def run(tab, mid_seq, continuation_state, instruments, drum_kit, bpm, time_sig, 
                                  remap_track_channel=remap_track_channel,
                                  add_default_instr=add_default_instr,
                                  remove_empty_channels=remove_empty_channels)
-        mid = np.asarray(mid, dtype=np.int64)
         mid = mid[:int(midi_events)]
-        mid_seq = []
-        for token_seq in mid:
-            mid_seq.append(token_seq.tolist())
+        mid = np.asarray([mid] * OUTPUT_BATCH_SIZE, dtype=np.int64)
+        mid_seq = mid.tolist()
     elif tab == 2 and mid_seq is not None:
-        continuation_state.append(len(mid_seq))
         mid = np.asarray(mid_seq, dtype=np.int64)
+        if continuation_select > 0:
+            continuation_state.append(mid_seq)
+            mid = np.repeat(mid[continuation_select - 1:continuation_select], repeats=OUTPUT_BATCH_SIZE, axis=0)
+            mid_seq = mid.tolist()
+        else:
+            continuation_state.append(mid.shape[1])
     else:
         continuation_state = [0]
-        mid_seq = []
-        mid = None
+        mid = [[tokenizer.bos_id] + [tokenizer.pad_id] * (tokenizer.max_token_seq - 1)]
+        mid = np.asarray([mid] * OUTPUT_BATCH_SIZE, dtype=np.int64)
+        mid_seq = mid.tolist()
 
     if mid is not None:
-        max_len += len(mid)
+        max_len += mid.shape[1]
 
-    events = [tokenizer.tokens2event(tokens) for tokens in mid_seq]
     init_msgs = [create_msg("progress", [0, gen_events])]
-    if tab != 2:
-        init_msgs += [create_msg("visualizer_clear", tokenizer.version),
-                     create_msg("visualizer_append", events)]
-    yield mid_seq, continuation_state, None, None, seed, send_msgs(init_msgs)
-    model = (model_base, model_token)
-    midi_generator = generate(model, mid, max_len=max_len, temp=temp, top_p=top_p, top_k=top_k,
-                         disable_patch_change=disable_patch_change, disable_control_change=not allow_cc,
-                         disable_channels=disable_channels, generator=generator)
-    events = []
+    if not (tab == 2 and continuation_select == 0):
+        for i in range(OUTPUT_BATCH_SIZE):
+            events = [tokenizer.tokens2event(tokens) for tokens in mid_seq[i]]
+            init_msgs += [create_msg("visualizer_clear", [i, tokenizer.version]),
+                          create_msg("visualizer_append", [i, events])]
+    yield mid_seq, continuation_state, seed, send_msgs(init_msgs)
+    model = (model_base, model_token, tokenizer)
+    midi_generator = generate(model, mid, batch_size=OUTPUT_BATCH_SIZE, max_len=max_len, temp=temp,
+                              top_p=top_p, top_k=top_k, disable_patch_change=disable_patch_change,
+                              disable_control_change=not allow_cc, disable_channels=disable_channels,
+                              generator=generator)
+    events = [list() for i in range(OUTPUT_BATCH_SIZE)]
     t = time.time()
-    for i, token_seq in enumerate(midi_generator):
-        token_seq = token_seq.tolist()
-        mid_seq.append(token_seq)
-        events.append(tokenizer.tokens2event(token_seq))
-        ct = time.time()
-        if ct - t > 0.2:
-            yield (mid_seq, continuation_state, None, None, seed,
-                   send_msgs([create_msg("visualizer_append", events),
-                              create_msg("progress", [i + 1, gen_events])]))
-            t = ct
-            events = []
-
-    events = [tokenizer.tokens2event(tokens) for tokens in mid_seq]
-    mid = tokenizer.detokenize(mid_seq)
-    audio = synthesizer.synthesis(MIDI.score2opus(mid))
-    with open(f"output.mid", 'wb') as f:
-        f.write(MIDI.score2midi(mid))
-    end_msgs = [create_msg("visualizer_clear", tokenizer.version),
-                create_msg("visualizer_append", events),
-                create_msg("visualizer_end", None),
-                create_msg("progress", [0, 0])]
-    yield mid_seq, continuation_state, "output.mid", (44100, audio), seed, send_msgs(end_msgs)
+    for i, token_seqs in enumerate(midi_generator):
+        token_seqs = token_seqs.tolist()
+        for j in range(OUTPUT_BATCH_SIZE):
+            token_seq = token_seqs[j]
+            mid_seq[j].append(token_seq)
+            events[j].append(tokenizer.tokens2event(token_seq))
+        if time.time() - t > 0.2:
+            msgs = [create_msg("progress", [i + 1, gen_events])]
+            for j in range(OUTPUT_BATCH_SIZE):
+                msgs += [create_msg("visualizer_append", [j, events[j]])]
+                events[j] = list()
+            yield mid_seq, continuation_state, seed, send_msgs(msgs)
+            t = time.time()
+    yield mid_seq, continuation_state, seed, send_msgs([])
 
 
-def cancel_run(mid_seq):
+def finish_run(mid_seq):
     if mid_seq is None:
-        return None, None, send_msgs([])
-    events = [tokenizer.tokens2event(tokens) for tokens in mid_seq]
-    mid = tokenizer.detokenize(mid_seq)
-    audio = synthesizer.synthesis(MIDI.score2opus(mid))
-    with open(f"output.mid", 'wb') as f:
-        f.write(MIDI.score2midi(mid))
-    end_msgs = [create_msg("visualizer_clear", tokenizer.version),
-                create_msg("visualizer_append", events),
-                create_msg("visualizer_end", None),
-                create_msg("progress", [0, 0])]
-    return "output.mid", (44100, audio), send_msgs(end_msgs)
+        outputs = [None] * OUTPUT_BATCH_SIZE
+        return *outputs, []
+    outputs = []
+    end_msgs = [create_msg("progress", [0, 0])]
+    if not os.path.exists("outputs"):
+        os.mkdir("outputs")
+    for i in range(OUTPUT_BATCH_SIZE):
+        events = [tokenizer.tokens2event(tokens) for tokens in mid_seq[i]]
+        mid = tokenizer.detokenize(mid_seq[i])
+        with open(f"outputs/output{i + 1}.mid", 'wb') as f:
+            f.write(MIDI.score2midi(mid))
+        outputs.append(f"outputs/output{i + 1}.mid")
+        end_msgs += [create_msg("visualizer_clear", [i, tokenizer.version]),
+                     create_msg("visualizer_append", [i, events]),
+                     create_msg("visualizer_end", i)]
+    return *outputs, send_msgs(end_msgs)
+
+
+def synthesis_task(mid):
+    return synthesizer.synthesis(MIDI.score2opus(mid))
+
+def render_audio(mid_seq, should_render_audio):
+    if (not should_render_audio) or mid_seq is None:
+        outputs = [None] * OUTPUT_BATCH_SIZE
+        return tuple(outputs)
+    outputs = []
+    if not os.path.exists("outputs"):
+        os.mkdir("outputs")
+    audio_futures = []
+    for i in range(OUTPUT_BATCH_SIZE):
+        mid = tokenizer.detokenize(mid_seq[i])
+        audio_future = thread_pool.submit(synthesis_task, mid)
+        audio_futures.append(audio_future)
+    for future in audio_futures:
+        outputs.append((44100, future.result()))
+    return tuple(outputs)
 
 
 def undo_continuation(mid_seq, continuation_state):
     if mid_seq is None or len(continuation_state) < 2:
         return mid_seq, continuation_state, send_msgs([])
-    mid_seq = mid_seq[:continuation_state[-1]]
+    if isinstance(continuation_state[-1], list):
+        mid_seq = continuation_state[-1]
+    else:
+        mid_seq = [ms[:continuation_state[-1]] for ms in mid_seq]
     continuation_state = continuation_state[:-1]
-    events = [tokenizer.tokens2event(tokens) for tokens in mid_seq]
-    end_msgs = [create_msg("visualizer_clear", tokenizer.version),
-                create_msg("visualizer_append", events),
-                create_msg("visualizer_end", None),
-                create_msg("progress", [0, 0])]
+    end_msgs = [create_msg("progress", [0, 0])]
+    for i in range(OUTPUT_BATCH_SIZE):
+        events = [tokenizer.tokens2event(tokens) for tokens in mid_seq[i]]
+        end_msgs += [create_msg("visualizer_clear", [i, tokenizer.version]),
+                     create_msg("visualizer_append", [i, events]),
+                     create_msg("visualizer_end", i)]
     return mid_seq, continuation_state, send_msgs(end_msgs)
 
 
@@ -285,7 +335,10 @@ def load_javascript(dir="javascript"):
     javascript = ""
     for path in scripts_list:
         with open(path, "r", encoding="utf8") as jsfile:
-            javascript += f"\n<!-- {path} --><script>{jsfile.read()}</script>"
+            js_content = jsfile.read()
+            js_content = js_content.replace("const MIDI_OUTPUT_BATCH_SIZE=4;",
+                                            f"const MIDI_OUTPUT_BATCH_SIZE={OUTPUT_BATCH_SIZE};")
+            javascript += f"\n<!-- {path} --><script>{js_content}</script>"
     template_response_ori = gr.routes.templates.TemplateResponse
 
     def template_response(*args, **kwargs):
@@ -322,6 +375,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--share", action="store_true", default=False, help="share gradio app")
     parser.add_argument("--port", type=int, default=-1, help="gradio server port")
+    parser.add_argument("--batch", type=int, default=4, help="batch size")
     parser.add_argument("--max-gen", type=int, default=4096, help="max")
     parser.add_argument("--soundfont-path", type=str, default="soundfont.sf2", help="soundfont")
     parser.add_argument("--model-config", type=str, default="tv2o-medium", help="model config name")
@@ -337,7 +391,7 @@ if __name__ == "__main__":
                         default="https://huggingface.co/skytnt/midi-model-tv2o-medium/resolve/main/onnx/model_token.onnx",
                         help="download model-token to model-token-path if file not exist")
     opt = parser.parse_args()
-
+    OUTPUT_BATCH_SIZE = opt.batch
     try:
         download_if_not_exit(opt.soundfont_url, opt.soundfont_path)
         download_if_not_exit(opt.model_base_url, opt.model_base_path)
@@ -348,6 +402,7 @@ if __name__ == "__main__":
         exit(-1)
     soundfont_path = opt.soundfont_path
     synthesizer = MidiSynthesizer(soundfont_path)
+    thread_pool = ThreadPoolExecutor(max_workers=OUTPUT_BATCH_SIZE)
     tokenizer = get_tokenizer(opt.model_config)
     providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
     try:
@@ -424,7 +479,12 @@ if __name__ == "__main__":
                     label="add a default instrument to channels that don't have an instrument", value=True)
                 input_remove_empty_channels = gr.Checkbox(label="remove channels without notes", value=False)
             with gr.TabItem("last output prompt") as tab3:
-                gr.Markdown("Continue generating on the last output. Just click the generate button")
+                gr.Markdown("Continue generating on the last output.")
+                input_continuation_select = gr.Radio(label="select output to continue generating", value="all",
+                                                     choices=["all"] + [f"output{i + 1}" for i in
+                                                                        range(OUTPUT_BATCH_SIZE)],
+                                                     type="index"
+                                                     )
                 undo_btn = gr.Button("undo the last continuation")
 
         tab1.select(lambda: 0, None, tab_select, queue=False)
@@ -437,28 +497,43 @@ if __name__ == "__main__":
                                      step=1, value=opt.max_gen // 2)
         with gr.Accordion("options", open=False):
             input_temp = gr.Slider(label="temperature", minimum=0.1, maximum=1.2, step=0.01, value=1)
-            input_top_p = gr.Slider(label="top p", minimum=0.1, maximum=1, step=0.01, value=0.98)
-            input_top_k = gr.Slider(label="top k", minimum=1, maximum=128, step=1, value=12)
+            input_top_p = gr.Slider(label="top p", minimum=0.1, maximum=1, step=0.01, value=0.94)
+            input_top_k = gr.Slider(label="top k", minimum=1, maximum=128, step=1, value=20)
             input_allow_cc = gr.Checkbox(label="allow midi cc event", value=True)
-            example3 = gr.Examples([[1, 0.93, 128], [1, 0.98, 20], [1, 0.98, 12]],
+            input_render_audio = gr.Checkbox(label="render audio after generation", value=True)
+            example3 = gr.Examples([[1, 0.94, 128], [1, 0.98, 20], [1, 0.98, 12]],
                                    [input_temp, input_top_p, input_top_k])
         run_btn = gr.Button("generate", variant="primary")
         stop_btn = gr.Button("stop and output")
         output_midi_seq = gr.State()
         output_continuation_state = gr.State([0])
-        output_midi_visualizer = gr.HTML(elem_id="midi_visualizer_container")
-        output_audio = gr.Audio(label="output audio", format="mp3", elem_id="midi_audio")
-        output_midi = gr.File(label="output midi", file_types=[".mid"])
+        midi_outputs = []
+        audio_outputs = []
+        with gr.Tabs(elem_id="output_tabs"):
+            for i in range(OUTPUT_BATCH_SIZE):
+                with gr.TabItem(f"output {i + 1}") as tab1:
+                    output_midi_visualizer = gr.HTML(elem_id=f"midi_visualizer_container_{i}")
+                    output_audio = gr.Audio(label="output audio", format="mp3", elem_id=f"midi_audio_{i}")
+                    output_midi = gr.File(label="output midi", file_types=[".mid"])
+                    midi_outputs.append(output_midi)
+                    audio_outputs.append(output_audio)
         run_event = run_btn.click(run, [tab_select, output_midi_seq, output_continuation_state,
-                                        input_instruments, input_drum_kit, input_bpm,
+                                        input_continuation_select, input_instruments, input_drum_kit, input_bpm,
                                         input_time_sig, input_key_sig, input_midi, input_midi_events,
                                         input_reduce_cc_st, input_remap_track_channel, input_add_default_instr,
                                         input_remove_empty_channels, input_seed, input_seed_rand, input_gen_events,
                                         input_temp, input_top_p, input_top_k, input_allow_cc],
-                                  [output_midi_seq, output_continuation_state,
-                                   output_midi, output_audio, input_seed, js_msg],
-                                  concurrency_limit=3)
-        stop_btn.click(cancel_run, [output_midi_seq], [output_midi, output_audio, js_msg], cancels=run_event, queue=False)
+                                  [output_midi_seq, output_continuation_state, input_seed, js_msg],
+                                  concurrency_limit=3, queue=True)
+        finish_run_event = run_event.then(fn=finish_run,
+                                          inputs=[output_midi_seq],
+                                          outputs=midi_outputs + [js_msg],
+                                          queue=False)
+        finish_run_event.then(fn=render_audio,
+                              inputs=[output_midi_seq, input_render_audio],
+                              outputs=audio_outputs,
+                              queue=False)
+        stop_btn.click(None, [], [], cancels=run_event, queue=False)
         undo_btn.click(undo_continuation, [output_midi_seq, output_continuation_state],
                             [output_midi_seq, output_continuation_state, js_msg], queue=False)
     try:
@@ -470,3 +545,5 @@ if __name__ == "__main__":
         print(e)
         input("Failed to launch webui.\nPress any key to continue...")
         exit(-1)
+    finally:
+        thread_pool.shutdown()

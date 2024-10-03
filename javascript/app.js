@@ -1,4 +1,5 @@
 const MIDI_OUTPUT_BATCH_SIZE=4;
+//Do not change MIDI_OUTPUT_BATCH_SIZE. It will be automatically replaced.
 
 /**
  * 自动绕过 shadowRoot 的 querySelector

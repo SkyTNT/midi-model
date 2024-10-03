@@ -19,7 +19,6 @@ from midi_synthesizer import MidiSynthesizer
 from midi_tokenizer import MIDITokenizerV1, MIDITokenizerV2
 
 MAX_SEED = np.iinfo(np.int32).max
-OUTPUT_BATCH_SIZE = 4
 
 
 @torch.inference_mode()
@@ -118,8 +117,7 @@ def send_msgs(msgs):
 
 
 def run(tab, mid_seq, continuation_state, continuation_select, instruments, drum_kit, bpm, time_sig, key_sig, mid,
-        midi_events,
-        reduce_cc_st, remap_track_channel, add_default_instr, remove_empty_channels, seed, seed_rand,
+        midi_events,  reduce_cc_st, remap_track_channel, add_default_instr, remove_empty_channels, seed, seed_rand,
         gen_events, temp, top_p, top_k, allow_cc):
     bpm = int(bpm)
     if time_sig == "auto":
@@ -303,7 +301,10 @@ def load_javascript(dir="javascript"):
     javascript = ""
     for path in scripts_list:
         with open(path, "r", encoding="utf8") as jsfile:
-            javascript += f"\n<!-- {path} --><script>{jsfile.read()}</script>"
+            js_content = jsfile.read()
+            js_content = js_content.replace("const MIDI_OUTPUT_BATCH_SIZE=4;",
+                                            f"const MIDI_OUTPUT_BATCH_SIZE={OUTPUT_BATCH_SIZE};")
+            javascript += f"\n<!-- {path} --><script>{js_content}</script>"
     template_response_ori = gr.routes.templates.TemplateResponse
 
     def template_response(*args, **kwargs):
@@ -327,8 +328,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=7860, help="gradio server port")
     parser.add_argument("--device", type=str, default="cuda", help="device to run model")
+    parser.add_argument("--batch", type=int, default=4, help="batch size")
     parser.add_argument("--share", action="store_true", default=False, help="share gradio")
     opt = parser.parse_args()
+    OUTPUT_BATCH_SIZE = opt.batch
     soundfont_path = hf_hub_download(repo_id="skytnt/midi-model", filename="soundfont.sf2")
     synthesizer = MidiSynthesizer(soundfont_path)
     thread_pool = ThreadPoolExecutor(max_workers=OUTPUT_BATCH_SIZE)
@@ -420,11 +423,11 @@ if __name__ == "__main__":
                                      step=1, value=512)
         with gr.Accordion("options", open=False):
             input_temp = gr.Slider(label="temperature", minimum=0.1, maximum=1.2, step=0.01, value=1)
-            input_top_p = gr.Slider(label="top p", minimum=0.1, maximum=1, step=0.01, value=0.98)
-            input_top_k = gr.Slider(label="top k", minimum=1, maximum=128, step=1, value=12)
+            input_top_p = gr.Slider(label="top p", minimum=0.1, maximum=1, step=0.01, value=0.94)
+            input_top_k = gr.Slider(label="top k", minimum=1, maximum=128, step=1, value=20)
             input_allow_cc = gr.Checkbox(label="allow midi cc event", value=True)
             input_render_audio = gr.Checkbox(label="render audio after generation", value=True)
-            example3 = gr.Examples([[1, 0.93, 128], [1, 0.98, 20], [1, 0.98, 12]],
+            example3 = gr.Examples([[1, 0.94, 128], [1, 0.98, 20], [1, 0.98, 12]],
                                    [input_temp, input_top_p, input_top_k])
         run_btn = gr.Button("generate", variant="primary")
         stop_btn = gr.Button("stop and output")
