@@ -735,6 +735,7 @@ class MIDITokenizerV2:
             track_idx_dict = {}
             key_sigs = []
             key_signature_to_add = []
+            key_signature_to_remove = []
             for event in event_list:
                 name = event[0]
                 track_idx = event[3]
@@ -751,17 +752,22 @@ class MIDITokenizerV2:
                     for c, tr_map in track_idx_map.items():
                         if track_idx in tr_map:
                             new_track_idx = tr_map[track_idx]
+                            c = channels_map[c]
                             new_channel_track_idx = (c, new_track_idx)
                             if new_track_idx == 0:
                                 continue
                             if new_channel_track_idx not in new_channel_track_idxs:
                                 new_channel_track_idxs.append(new_channel_track_idx)
-                    key_sigs.append(event)
+
                     if len(new_channel_track_idxs) == 0:
-                        event[3] = 0
+                        if event[3] == 0: # keep key_signature on track 0 (meta)
+                            key_sigs.append(event)
+                            continue
+                        key_signature_to_remove.append(event) # empty track
                         continue
                     c, nt = new_channel_track_idxs[0]
                     event[3] = nt
+                    key_sigs.append(event)
                     if c == 9:
                         event[4] = 7 # sf=0
                     for c, nt in new_channel_track_idxs[1:]:
@@ -783,6 +789,8 @@ class MIDITokenizerV2:
                     event[3] = new_track_idx
                     if name == "patch_change" and event[4] not in patch_channels:
                         patch_channels.append(event[4])
+            for key_sig in key_signature_to_remove:
+                event_list.remove(key_sig)
             event_list += key_signature_to_add
             track_to_channels ={}
             for c, tr_map in track_idx_map.items():
