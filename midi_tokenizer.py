@@ -235,7 +235,9 @@ class MIDITokenizerV1:
             else:
                 if event[0] == "note":
                     notes_in_setup = True
-                key = tuple(event[3:-1])
+                    key = tuple([event[0]] + event[3:-2])
+                else:
+                    key = tuple([event[0]] + event[3:-1])
             setup_events[key] = new_event
 
         last_t1 = 0
@@ -763,6 +765,7 @@ class MIDITokenizerV2:
                         if event[3] == 0: # keep key_signature on track 0 (meta)
                             key_sigs.append(event)
                             continue
+                        event[3] = -1 # avoid remove same event
                         key_signature_to_remove.append(event) # empty track
                         continue
                     c, nt = new_channel_track_idxs[0]
@@ -860,7 +863,10 @@ class MIDITokenizerV2:
             else:
                 if event[0] == "note":
                     notes_in_setup = True
-                key = tuple(event[3:-1])
+                if event[0] in ["note", "time_signature", "key_signature"]:
+                    key = tuple([event[0]]+event[3:-2])
+                else:
+                    key = tuple([event[0]]+event[3:-1])
             setup_events[key] = new_event
 
         last_t1 = 0
