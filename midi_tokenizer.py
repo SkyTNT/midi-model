@@ -590,7 +590,7 @@ class MIDITokenizerV2:
         empty_channels = [True] * 16
         channel_note_tracks = {i: list() for i in range(16)}
         note_key_hist = [0]*12
-        key_sig_num = 0
+        key_sigs = []
         track_to_channels = {}
         for track_idx, track in enumerate(midi_score[1:129]):
             last_notes = {}
@@ -661,9 +661,9 @@ class MIDITokenizerV2:
                     sf, mi = event[2:]
                     if not (-7 <= sf <= 7 and 0 <= mi <= 1):  # invalid
                         continue
-                    key_sig_num += 1
                     sf += 7
                     new_event += [sf, mi]
+                    key_sigs.append(new_event)
 
                 if name == "note":
                     key = tuple(new_event[:-2])
@@ -731,6 +731,7 @@ class MIDITokenizerV2:
 
             empty_channels = [channels_map[c] for c in empty_channels]
             track_idx_dict = {}
+            key_sigs = []
             key_signature_to_add = []
             for event in event_list:
                 name = event[0]
@@ -751,6 +752,7 @@ class MIDITokenizerV2:
                             new_channel_track_idx = (c, new_track_idx)
                             if new_channel_track_idx not in new_channel_track_idxs:
                                 new_channel_track_idxs.append(new_channel_track_idx)
+                    key_sigs.append(event)
                     if len(new_channel_track_idxs) == 0:
                         event[3] = 0
                         continue
@@ -763,6 +765,7 @@ class MIDITokenizerV2:
                         new_event[3] = nt
                         if c == 9:
                             new_event[4] = 7  # sf=0
+                        key_sigs.append(new_event)
                         key_signature_to_add.append(new_event)
                 elif name == "control_change" or name == "patch_change":
                     c = event[4]
@@ -793,16 +796,31 @@ class MIDITokenizerV2:
                 if c not in patch_channels and c in track_idx_dict:
                     event_list.append(["patch_change", 0, 0, track_idx_dict[c], c, 0])
 
-        if key_sig_num == 0:
-            # detect key signature.
+        if len(key_sigs) == 0 or all([key_sig[4]==7 for key_sig in key_sigs]):
+            # detect key signature or fix the default key signature
             root_key = self.detect_key_signature(note_key_hist)
             if root_key is not None:
                 sf = self.key2sf(root_key, 0)
                 # print("detect_key_signature",sf)
-                for tr, cs in track_to_channels.items():
-                    if remap_track_channel and tr == 0:
-                        continue
-                    event_list.append(["key_signature", 0, 0, tr, (0 if (len(cs) == 1 and cs[0] == 9) else sf) + 7, 0])
+                if len(key_sigs) == 0:
+                    for tr, cs in track_to_channels.items():
+                        if remap_track_channel and tr == 0:
+                            continue
+                        new_event = ["key_signature", 0, 0, tr, (0 if (len(cs) == 1 and cs[0] == 9) else sf) + 7, 0]
+                        event_list.append(new_event)
+                else:
+                    for key_sig in key_sigs:
+                        tr = key_sig[3]
+                        if tr in track_to_channels:
+                            cs = track_to_channels[tr]
+                            if len(cs) == 1 and cs[0] == 9:
+                                continue
+                        key_sig[4] = sf + 7
+                        key_sig[5] = 0
+            else:
+                # remove default key signature
+                for key_sig in key_sigs:
+                    event_list.remove(key_sig)
 
         events_name_order = ["time_signature", "key_signature", "set_tempo", "patch_change", "control_change", "note"]
         events_name_order = {name: i for i, name in enumerate(events_name_order)}
