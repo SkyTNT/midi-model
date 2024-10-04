@@ -200,7 +200,7 @@ class MIDITokenizerV1:
                     note_tracks = channel_note_tracks[c]
                     if len(note_tracks) != 0 and track_idx not in note_tracks:
                         track_idx = channel_note_tracks[c][0]
-                    new_track_idx = tr_map.setdefault(track_idx, next(iter(tr_map.values())))
+                    new_track_idx = tr_map[track_idx]
                     event[3] = new_track_idx
                     if name == "patch_change" and event[4] not in patch_channels:
                         patch_channels.append(event[4])
@@ -551,6 +551,8 @@ class MIDITokenizerV2:
     def detect_key_signature(key_hist, threshold=0.7):
         if len(key_hist) != 12:
             return None
+        if sum(key_hist) == 0:
+            return None
         p = sum(sorted(key_hist, reverse=True)[:7]) / sum(key_hist)
         if p < threshold:
             return None
@@ -665,7 +667,7 @@ class MIDITokenizerV2:
                     new_event += [sf, mi]
                     key_sigs.append(new_event)
 
-                if name == "note":
+                if name in ["note", "time_signature", "key_signature"]:
                     key = tuple(new_event[:-2])
                 else:
                     key = tuple(new_event[:-1])
@@ -750,6 +752,8 @@ class MIDITokenizerV2:
                         if track_idx in tr_map:
                             new_track_idx = tr_map[track_idx]
                             new_channel_track_idx = (c, new_track_idx)
+                            if new_track_idx == 0:
+                                continue
                             if new_channel_track_idx not in new_channel_track_idxs:
                                 new_channel_track_idxs.append(new_channel_track_idx)
                     key_sigs.append(event)
@@ -775,7 +779,7 @@ class MIDITokenizerV2:
                     note_tracks = channel_note_tracks[c]
                     if len(note_tracks) != 0 and track_idx not in note_tracks:
                         track_idx = channel_note_tracks[c][0]
-                    new_track_idx = tr_map.setdefault(track_idx, next(iter(tr_map.values())))
+                    new_track_idx = tr_map[track_idx]
                     event[3] = new_track_idx
                     if name == "patch_change" and event[4] not in patch_channels:
                         patch_channels.append(event[4])
