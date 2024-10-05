@@ -280,13 +280,16 @@ def undo_continuation(mid_seq, continuation_state):
     return mid_seq, continuation_state, send_msgs(end_msgs)
 
 
-def load_model(path, model_config):
+def load_model(path, model_config, lora_path):
     global model, tokenizer
     model = MIDIModel(config=MIDIModelConfig.from_name(model_config))
     tokenizer = model.tokenizer
     ckpt = torch.load(path, map_location="cpu")
     state_dict = ckpt.get("state_dict", ckpt)
     model.load_state_dict(state_dict, strict=False)
+    if lora_path:
+        model.load_adapter(lora_path, "default")
+        model.set_adapter("default")
     model.to(opt.device, dtype=torch.bfloat16 if opt.device == "cuda" else torch.float32).eval()
     return "success"
 
@@ -294,6 +297,11 @@ def load_model(path, model_config):
 def get_model_path():
     model_paths = sorted(glob.glob("**/*.ckpt", recursive=True))
     return gr.Dropdown(choices=model_paths)
+
+def get_lora_path():
+    lora_paths = sorted(glob.glob("**/adapter_config.json", recursive=True))
+    lora_paths = [lora_path.replace("adapter_config.json","") for lora_path in lora_paths]
+    return gr.Dropdown(choices=lora_paths)
 
 
 def load_javascript(dir="javascript"):
@@ -353,12 +361,15 @@ if __name__ == "__main__":
         with gr.Accordion(label="Model option", open=True):
             load_model_path_btn = gr.Button("Get Models")
             model_path_input = gr.Dropdown(label="model")
-            model_config_input = gr.Dropdown(label="config", choices=config_name_list, value=config_name_list[0])
+            model_config_input = gr.Dropdown(label="config", choices=config_name_list, value="tv2o-medium")
             load_model_path_btn.click(get_model_path, [], model_path_input)
+            load_lora_path_btn = gr.Button("Get Loras")
+            lora_path_input = gr.Dropdown(label="lora")
+            load_lora_path_btn.click(get_lora_path, [], lora_path_input)
             load_model_btn = gr.Button("Load")
             model_msg = gr.Textbox()
             load_model_btn.click(
-                load_model, [model_path_input, model_config_input], model_msg
+                load_model, [model_path_input, model_config_input, lora_path_input], model_msg
             )
         tab_select = gr.State(value=0)
         with gr.Tabs():

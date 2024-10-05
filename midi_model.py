@@ -7,6 +7,7 @@ import torch.nn.functional as F
 import tqdm
 import lightning  as pl
 from transformers import LlamaModel, LlamaConfig
+from transformers.integrations import PeftAdapterMixin
 
 from midi_tokenizer import MIDITokenizerV1, MIDITokenizerV2, MIDITokenizer
 
@@ -56,7 +57,7 @@ class MIDIModelConfig:
             raise ValueError(f"Unknown model size {size}")
 
 
-class MIDIModel(pl.LightningModule):
+class MIDIModel(pl.LightningModule, PeftAdapterMixin):
     def __init__(self, config: MIDIModelConfig, flash=False, *args, **kwargs):
         super(MIDIModel, self).__init__()
         if flash:

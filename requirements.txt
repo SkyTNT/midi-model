@@ -1,6 +1,8 @@
 Pillow
 numpy
 torch
+safetensors
+peft>=0.13.0
 transformers>=4.36
 lightning==2.4.0
 gradio==4.43.0
