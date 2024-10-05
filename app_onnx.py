@@ -288,6 +288,8 @@ def render_audio(mid_seq, should_render_audio):
         audio_futures.append(audio_future)
     for future in audio_futures:
         outputs.append((44100, future.result()))
+    if OUTPUT_BATCH_SIZE == 1:
+        return outputs[0]
     return tuple(outputs)
 
 

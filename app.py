@@ -260,6 +260,8 @@ def render_audio(mid_seq, should_render_audio):
         audio_futures.append(audio_future)
     for future in audio_futures:
         outputs.append((44100, future.result()))
+    if OUTPUT_BATCH_SIZE == 1:
+        return outputs[0]
     return tuple(outputs)
 
 
@@ -336,7 +338,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=7860, help="gradio server port")
     parser.add_argument("--device", type=str, default="cuda", help="device to run model")
-    parser.add_argument("--batch", type=int, default=4, help="batch size")
+    parser.add_argument("--batch", type=int, default=1, help="batch size")
     parser.add_argument("--share", action="store_true", default=False, help="share gradio")
     opt = parser.parse_args()
     OUTPUT_BATCH_SIZE = opt.batch
