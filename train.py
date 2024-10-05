@@ -434,11 +434,11 @@ if __name__ == '__main__':
     if opt.task == "lora":
         model.requires_grad_(False)
         lora_config = LoraConfig(
-            r=256,
-            target_modules=["q_proj", "v_proj"],
+            r=64,
+            target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
             task_type=TaskType.CAUSAL_LM,
             bias="none",
-            lora_alpha=512,
+            lora_alpha=128,
             lora_dropout=0
         )
         model.add_adapter(lora_config)
