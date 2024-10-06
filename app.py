@@ -290,8 +290,7 @@ def load_model(path, model_config, lora_path):
     state_dict = ckpt.get("state_dict", ckpt)
     model.load_state_dict(state_dict, strict=False)
     if lora_path:
-        model.load_adapter(lora_path, "default")
-        model.set_adapter("default")
+        model = model.load_merge_lora(lora_path)
     model.to(opt.device, dtype=torch.bfloat16 if opt.device == "cuda" else torch.float32).eval()
     return "success"
 

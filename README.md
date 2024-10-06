@@ -5,7 +5,7 @@
 ![](./banner.png)
 
 ## Updates
-
+- v1.3: MIDITokenizerV2 and new MidiVisualizer
 - v1.2 : Optimise the tokenizer and dataset. The dataset was filtered by MIDITokenizer.check_quality. Using the higher quality dataset to train the model, the performance of the model is significantly improved.
 
 ## Demo

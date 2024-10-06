@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import tqdm
 import lightning  as pl
+from peft import PeftConfig, LoraModel, load_peft_weights, set_peft_model_state_dict
 from transformers import LlamaModel, LlamaConfig
 from transformers.integrations import PeftAdapterMixin
 
@@ -69,6 +70,13 @@ class MIDIModel(pl.LightningModule, PeftAdapterMixin):
         self.net = LlamaModel(config.net_config)
         self.net_token = LlamaModel(config.net_token_config)
         self.lm_head = nn.Linear(config.n_embd, self.tokenizer.vocab_size, bias=False)
+
+    def load_merge_lora(self, model_id):
+        peft_config = PeftConfig.from_pretrained(model_id)
+        model = LoraModel(self, peft_config, adapter_name="default")
+        adapter_state_dict = load_peft_weights(model_id, device=str(self.device))
+        set_peft_model_state_dict(self, adapter_state_dict, "default")
+        return model.merge_and_unload()
 
     def forward_token(self, hidden_state, x=None):
         """
