@@ -407,9 +407,9 @@ if __name__ == "__main__":
     parser.add_argument("--soundfont-path", type=str, default="soundfont.sf2", help="soundfont")
     parser.add_argument("--model-config", type=str, default="tv2o-medium", help="model config name")
     parser.add_argument("--model-base-path", type=str,
-                        default="save_models/default/model_base.onnx", help="model path")
+                        default="models/default/model_base.onnx", help="model path")
     parser.add_argument("--model-token-path", type=str,
-                        default="save_models/default/model_token.onnx", help="model path")
+                        default="models/default/model_token.onnx", help="model path")
     parser.add_argument("--soundfont-url", type=str,
                         default="https://huggingface.co/skytnt/midi-model/resolve/main/soundfont.sf2",
                         help="download soundfont to soundfont-path if file not exist")
@@ -429,37 +429,37 @@ if __name__ == "__main__":
         ],
         "generic pretrain model (tv2o-medium) by skytnt with jpop lora": [
             "tv2o-medium",
-            ["save_models/tv2om_skytnt_jpop_lora/model_base.onnx",
+            ["models/tv2om_skytnt_jpop_lora/model_base.onnx",
              "https://huggingface.co/skytnt/midi-model-tv2om-jpop-lora/resolve/main/onnx/model_base.onnx"],
-            ["save_models/tv2om_skytnt_jpop_lora/model_token.onnx",
+            ["models/tv2om_skytnt_jpop_lora/model_token.onnx",
              "https://huggingface.co/skytnt/midi-model-tv2om-jpop-lora/resolve/main/onnx/model_token.onnx"]
         ],
         "generic pretrain model (tv2o-medium) by skytnt with touhou lora": [
             "tv2o-medium",
-            ["save_models/tv2om_skytnt_touhou_lora/model_base.onnx",
+            ["models/tv2om_skytnt_touhou_lora/model_base.onnx",
              "https://huggingface.co/skytnt/midi-model-tv2om-touhou-lora/resolve/main/onnx/model_base.onnx"],
-            ["save_models/tv2om_skytnt_touhou_lora/model_token.onnx",
+            ["models/tv2om_skytnt_touhou_lora/model_token.onnx",
              "https://huggingface.co/skytnt/midi-model-tv2om-touhou-lora/resolve/main/onnx/model_token.onnx"]
         ],
         "generic pretrain model (tv2o-large) by asigalov61": [
             "tv2o-large",
-            ["save_models/tv2ol_asigalov61/model_base.onnx",
+            ["models/tv2ol_asigalov61/model_base.onnx",
              "https://huggingface.co/asigalov61/Music-Llama/resolve/main/onnx/model_base.onnx"],
-            ["save_models/tv2ol_asigalov61/model_token.onnx",
+            ["models/tv2ol_asigalov61/model_token.onnx",
              "https://huggingface.co/asigalov61/Music-Llama/resolve/main/onnx/model_token.onnx"]
         ],
         "generic pretrain model (tv2o-medium) by asigalov61": [
             "tv2o-medium",
-            ["save_models/tv2om_asigalov61/model_base.onnx",
+            ["models/tv2om_asigalov61/model_base.onnx",
              "https://huggingface.co/asigalov61/Music-Llama-Medium/resolve/main/onnx/model_base.onnx"],
-            ["save_models/tv2om_asigalov61/model_token.onnx",
+            ["models/tv2om_asigalov61/model_token.onnx",
              "https://huggingface.co/asigalov61/Music-Llama-Medium/resolve/main/onnx/model_token.onnx"]
         ],
         "generic pretrain model (tv1-medium) by skytnt": [
             "tv1-medium",
-            ["save_models/tv1m_skytnt/model_base.onnx",
+            ["models/tv1m_skytnt/model_base.onnx",
              "https://huggingface.co/skytnt/midi-model/resolve/main/onnx/model_base.onnx"],
-            ["save_models/tv1m_skytnt/model_token.onnx",
+            ["models/tv1m_skytnt/model_token.onnx",
              "https://huggingface.co/skytnt/midi-model/resolve/main/onnx/model_token.onnx"]
         ]
     }
