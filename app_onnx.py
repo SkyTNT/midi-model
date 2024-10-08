@@ -12,11 +12,13 @@ import numpy as np
 import onnxruntime as rt
 import requests
 import tqdm
+from packaging import version
 
 import MIDI
 from midi_synthesizer import MidiSynthesizer
 from midi_tokenizer import MIDITokenizer
 
+VERSION = "v1.3.3"
 MAX_SEED = np.iinfo(np.int32).max
 
 
@@ -458,6 +460,22 @@ def get_tokenizer(config_name):
     tokenizer.set_optimise_midi(o)
     return tokenizer
 
+
+def check_update(current_ver):
+    v1 = version.parse(current_ver)
+    url = f"https://api.github.com/repos/SkyTNT/midi-model/releases/latest"
+    try:
+        response = requests.get(url, timeout=2)
+        if response.status_code == 200:
+            latest_release = response.json()
+            v2 = version.parse(latest_release['tag_name'])
+            if v2 > v1:
+                print(f"A new version (v{v2}) is available! You are currently using v{v1}."
+                      f" Please update to the latest version for new features and improvements."
+                      f" https://github.com/SkyTNT/midi-model/releases")
+    except Exception:
+        print("Failed to Check update")
+
 number2drum_kits = {-1: "None", 0: "Standard", 8: "Room", 16: "Power", 24: "Electric", 25: "TR-808", 32: "Jazz",
                     40: "Blush", 48: "Orchestra"}
 patch2number = {v: k for k, v in MIDI.Number2patch.items()}
@@ -487,6 +505,7 @@ if __name__ == "__main__":
                         default="https://huggingface.co/skytnt/midi-model-tv2o-medium/resolve/main/onnx/model_token.onnx",
                         help="download model-token to model-token-path if file not exist")
     opt = parser.parse_args()
+    check_update(VERSION)
     OUTPUT_BATCH_SIZE = opt.batch
     models_info = {
         "generic pretrain model (tv2o-medium) by skytnt (default)": [
