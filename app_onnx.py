@@ -21,6 +21,8 @@ from midi_tokenizer import MIDITokenizer
 VERSION = "v1.3.3"
 MAX_SEED = np.iinfo(np.int32).max
 
+rt.set_default_logger_severity(3)
+
 
 def softmax(x, axis):
     x_max = np.amax(x, axis=axis, keepdims=True)
