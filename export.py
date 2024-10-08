@@ -90,7 +90,7 @@ def get_past_kv(config: LlamaConfig, batch_size=1, past_seq_len=16, torch_dtype=
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--ckpt", type=str, default="models/tv2m.ckpt", help="load ckpt"
+        "--ckpt", type=str, default="model.ckpt", help="load ckpt"
     )
     parser.add_argument(
         "--config", type=str, default="tv2o-medium", choices=config_name_list, help="model config"

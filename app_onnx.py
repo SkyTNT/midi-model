@@ -582,7 +582,8 @@ if __name__ == "__main__":
                     "[Open In Colab]"
                     "(https://colab.research.google.com/github/SkyTNT/midi-model/blob/main/demo.ipynb)"
                     " for faster running and longer generation\n\n"
-                    "**Update v1.3**: MIDITokenizerV2 and new MidiVisualizer"
+                    "**Update v1.3**: MIDITokenizerV2 and new MidiVisualizer\n\n"
+                    "The current **best** model: generic pretrain model (tv2o-medium) by skytnt"
                     )
         js_msg = gr.Textbox(elem_id="msg_receiver", visible=False)
         js_msg.change(None, [js_msg], [], js="""
