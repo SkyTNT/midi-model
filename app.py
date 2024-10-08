@@ -12,6 +12,7 @@ import torch
 import torch.nn.functional as F
 import tqdm
 from huggingface_hub import hf_hub_download
+from transformers import DynamicCache
 
 import MIDI
 from midi_model import MIDIModel, config_name_list, MIDIModelConfig
@@ -49,12 +50,14 @@ def generate(prompt=None, batch_size=1, max_len=512, temp=1.0, top_p=0.98, top_k
         input_tensor = torch.from_numpy(prompt).to(dtype=torch.long, device=model.device)
     cur_len = input_tensor.shape[1]
     bar = tqdm.tqdm(desc="generating", total=max_len - cur_len)
+    cache1 = DynamicCache()
     with bar:
         while cur_len < max_len:
             end = [False] * batch_size
-            hidden = model.forward(input_tensor)[:, -1]
+            hidden = model.forward(input_tensor[:,-1:], cache=cache1)[:, -1]
             next_token_seq = None
             event_names = [""] * batch_size
+            cache2 = DynamicCache()
             for i in range(max_token_seq):
                 mask = torch.zeros((batch_size, tokenizer.vocab_size), dtype=torch.int64, device=model.device)
                 for b in range(batch_size):
@@ -79,7 +82,11 @@ def generate(prompt=None, batch_size=1, max_len=512, temp=1.0, top_p=0.98, top_k
                             mask_ids = [i for i in mask_ids if i not in disable_channels]
                         mask[b, mask_ids] = 1
                 mask = mask.unsqueeze(1)
-                logits = model.forward_token(hidden, next_token_seq)[:, -1:]
+                x = next_token_seq
+                if i != 0:
+                    hidden = None
+                    x = x[:, -1:]
+                logits = model.forward_token(hidden, x, cache=cache2)[:, -1:]
                 scores = torch.softmax(logits / temp, dim=-1) * mask
                 samples = model.sample_top_p_k(scores, top_p, top_k, generator=generator)
                 if i == 0:
