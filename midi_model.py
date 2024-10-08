@@ -155,10 +155,11 @@ class MIDIModel(pl.LightningModule, PeftAdapterMixin):
         cur_len = input_tensor.shape[1]
         bar = tqdm.tqdm(desc="generating", total=max_len - cur_len)
         cache1 = DynamicCache()
+        past_len = 0
         with bar:
             while cur_len < max_len:
                 end = [False] * batch_size
-                hidden = self.forward(input_tensor[:,-1:], cache=cache1)[:, -1]
+                hidden = self.forward(input_tensor[:, past_len:], cache=cache1)[:, -1]
                 next_token_seq = None
                 event_names = [""] * batch_size
                 cache2 = DynamicCache()
@@ -205,6 +206,7 @@ class MIDIModel(pl.LightningModule, PeftAdapterMixin):
                                            "constant", value=tokenizer.pad_id)
                 next_token_seq = next_token_seq.unsqueeze(1)
                 input_tensor = torch.cat([input_tensor, next_token_seq], dim=1)
+                past_len = cur_len
                 cur_len += 1
                 bar.update(1)
 

@@ -51,10 +51,11 @@ def generate(prompt=None, batch_size=1, max_len=512, temp=1.0, top_p=0.98, top_k
     cur_len = input_tensor.shape[1]
     bar = tqdm.tqdm(desc="generating", total=max_len - cur_len)
     cache1 = DynamicCache()
+    past_len = 0
     with bar:
         while cur_len < max_len:
             end = [False] * batch_size
-            hidden = model.forward(input_tensor[:,-1:], cache=cache1)[:, -1]
+            hidden = model.forward(input_tensor[:, past_len:], cache=cache1)[:, -1]
             next_token_seq = None
             event_names = [""] * batch_size
             cache2 = DynamicCache()
@@ -108,6 +109,7 @@ def generate(prompt=None, batch_size=1, max_len=512, temp=1.0, top_p=0.98, top_k
                                        "constant", value=tokenizer.pad_id)
             next_token_seq = next_token_seq.unsqueeze(1)
             input_tensor = torch.cat([input_tensor, next_token_seq], dim=1)
+            past_len = cur_len
             cur_len += 1
             bar.update(1)
             yield next_token_seq[:, 0].cpu().numpy()
