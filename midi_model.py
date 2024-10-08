@@ -1,3 +1,4 @@
+import json
 from typing import Union
 
 import numpy as np
@@ -22,6 +23,13 @@ class MIDIModelConfig:
         self.net_config = net_config
         self.net_token_config = net_token_config
         self.n_embd = net_token_config.hidden_size
+
+    def __str__(self):
+        d = {
+            "net": self.net_config.to_json_string(use_diff=False),
+            "net_token": self.net_token_config.to_json_string(use_diff=False)
+        }
+        return json.dumps(d, indent=4)
 
     @staticmethod
     def get_config(tokenizer_ver="v2", optimise_midi=True, n_layer=12, n_head=16, n_embd=1024, n_inner=4096):

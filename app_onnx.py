@@ -45,6 +45,36 @@ def sample_top_p_k(probs, p, k, generator=None):
     next_token = next_token.reshape(*shape[:-1])
     return next_token
 
+def apply_io_binding(model: rt.InferenceSession, inputs, outputs, batch_size, past_len, cur_len):
+    io_binding = model.io_binding()
+    for input_ in  model.get_inputs():
+        name = input_.name
+        if name.startswith("past_key_values"):
+            present_name = name.replace("past_key_values", "present")
+            if present_name in outputs:
+                v = outputs[present_name]
+            else:
+                v = rt.OrtValue.ortvalue_from_shape_and_type(
+                    (batch_size, input_.shape[1], past_len, input_.shape[3]),
+                    element_type=np.float32,
+                    device_type=device)
+            inputs[name] = v
+        else:
+            v = inputs[name]
+        io_binding.bind_ortvalue_input(name, v)
+
+    for output in model.get_outputs():
+        name = output.name
+        if name.startswith("present"):
+            v = rt.OrtValue.ortvalue_from_shape_and_type(
+                (batch_size, output.shape[1], cur_len, output.shape[3]),
+                element_type=np.float32,
+                device_type=device)
+            outputs[name] = v
+        else:
+            v = outputs[name]
+        io_binding.bind_ortvalue_output(name, v)
+    return io_binding
 
 def generate(model, prompt=None, batch_size=1, max_len=512, temp=1.0, top_p=0.98, top_k=20,
              disable_patch_change=False, disable_control_change=False, disable_channels=None, generator=None):
@@ -76,12 +106,31 @@ def generate(model, prompt=None, batch_size=1, max_len=512, temp=1.0, top_p=0.98
         input_tensor = prompt
     cur_len = input_tensor.shape[1]
     bar = tqdm.tqdm(desc="generating", total=max_len - cur_len)
+    model0_inputs = {}
+    model0_outputs = {}
+    emb_size = 1024
+    for output in model[0].get_outputs():
+        if output.name == "hidden":
+            emb_size = output.shape[2]
+    past_len = 0
     with bar:
         while cur_len < max_len:
             end = [False] * batch_size
-            hidden = model[0].run(None, {'x': input_tensor})[0][:, -1]
-            next_token_seq = np.empty((batch_size, 0), dtype=np.int64)
+            model0_inputs["x"] = rt.OrtValue.ortvalue_from_numpy(input_tensor[:, past_len:], device_type=device)
+            model0_outputs["hidden"] = rt.OrtValue.ortvalue_from_shape_and_type(
+                (batch_size, cur_len - past_len, emb_size),
+                element_type=np.float32,
+                device_type=device)
+            io_binding = apply_io_binding(model[0], model0_inputs, model0_outputs, batch_size, past_len, cur_len)
+            io_binding.synchronize_inputs()
+            model[0].run_with_iobinding(io_binding)
+            io_binding.synchronize_outputs()
+
+            hidden = model0_outputs["hidden"].numpy()[:, -1:]
+            next_token_seq = np.zeros((batch_size, 0), dtype=np.int64)
             event_names = [""] * batch_size
+            model1_inputs = {"hidden": rt.OrtValue.ortvalue_from_numpy(hidden, device_type=device)}
+            model1_outputs = {}
             for i in range(max_token_seq):
                 mask = np.zeros((batch_size, tokenizer.vocab_size), dtype=np.int64)
                 for b in range(batch_size):
@@ -106,7 +155,24 @@ def generate(model, prompt=None, batch_size=1, max_len=512, temp=1.0, top_p=0.98
                             mask_ids = [i for i in mask_ids if i not in disable_channels]
                         mask[b, mask_ids] = 1
                 mask = mask[:, None, :]
-                logits = model[1].run(None, {'x': next_token_seq, "hidden": hidden})[0][:, -1:]
+                x = next_token_seq
+                if i != 0:
+                    # cached
+                    if i == 1:
+                        hidden = np.zeros((batch_size, 0, emb_size), dtype=np.float32)
+                        model1_inputs["hidden"] = rt.OrtValue.ortvalue_from_numpy(hidden, device_type=device)
+                    x = x[:, -1:]
+                model1_inputs["x"] = rt.OrtValue.ortvalue_from_numpy(x, device_type=device)
+                model1_outputs["y"] = rt.OrtValue.ortvalue_from_shape_and_type(
+                    (batch_size, 1, tokenizer.vocab_size),
+                    element_type=np.float32,
+                    device_type=device
+                )
+                io_binding = apply_io_binding(model[1], model1_inputs, model1_outputs, batch_size, i, i+1)
+                io_binding.synchronize_inputs()
+                model[1].run_with_iobinding(io_binding)
+                io_binding.synchronize_outputs()
+                logits = model1_outputs["y"].numpy()
                 scores = softmax(logits / temp, -1) * mask
                 samples = sample_top_p_k(scores, top_p, top_k, generator)
                 if i == 0:
@@ -129,6 +195,7 @@ def generate(model, prompt=None, batch_size=1, max_len=512, temp=1.0, top_p=0.98
                                         mode="constant", constant_values=tokenizer.pad_id)
             next_token_seq = next_token_seq[:, None, :]
             input_tensor = np.concatenate([input_tensor, next_token_seq], axis=1)
+            past_len = cur_len
             cur_len += 1
             bar.update(1)
             yield next_token_seq[:, 0]
@@ -402,7 +469,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--share", action="store_true", default=False, help="share gradio app")
     parser.add_argument("--port", type=int, default=-1, help="gradio server port")
-    parser.add_argument("--batch", type=int, default=4, help="batch size")
+    parser.add_argument("--batch", type=int, default=8, help="batch size")
     parser.add_argument("--max-gen", type=int, default=4096, help="max")
     parser.add_argument("--soundfont-path", type=str, default="soundfont.sf2", help="soundfont")
     parser.add_argument("--model-config", type=str, default="tv2o-medium", help="model config name")
@@ -477,6 +544,7 @@ if __name__ == "__main__":
     thread_pool = ThreadPoolExecutor(max_workers=OUTPUT_BATCH_SIZE)
     tokenizer = get_tokenizer(opt.model_config)
     providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+    device = "cuda"
     try:
         model_base = rt.InferenceSession(opt.model_base_path, providers=providers)
         model_token = rt.InferenceSession(opt.model_token_path, providers=providers)

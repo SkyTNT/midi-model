@@ -1,8 +1,11 @@
-import torch
 import argparse
+from itertools import chain
+
+import torch
 import torch.nn as nn
+from transformers import LlamaConfig, DynamicCache
+
 from midi_model import MIDIModel, config_name_list, MIDIModelConfig
-from midi_tokenizer import MIDITokenizer
 
 
 class MIDIModelBase(nn.Module):
@@ -10,8 +13,14 @@ class MIDIModelBase(nn.Module):
         super().__init__()
         self.net = model.net
 
-
-MIDIModelBase.forward = MIDIModel.forward
+    def forward(self, x, past_kv):
+        cache = DynamicCache.from_legacy_cache(past_kv)
+        x = self.net.embed_tokens(x)
+        x = x.sum(dim=-2)
+        x = self.net.forward(inputs_embeds=x,
+                             past_key_values=cache,
+                             use_cache=True)
+        return x.last_hidden_state, cache.to_legacy_cache()
 
 
 class MIDIModelToken(nn.Module):
@@ -20,11 +29,18 @@ class MIDIModelToken(nn.Module):
         self.net_token = model.net_token
         self.lm_head = model.lm_head
 
+    def forward(self, hidden_state, x, past_kv):
+        cache = DynamicCache.from_legacy_cache(past_kv)
+        x = self.net_token.embed_tokens(x)
+        x = torch.cat([hidden_state, x], dim=1)
+        hidden_state = x
+        hidden_state = self.net_token.forward(inputs_embeds=hidden_state,
+                                              past_key_values=cache,
+                                              use_cache=True).last_hidden_state
+        return self.lm_head(hidden_state), cache.to_legacy_cache()
 
-MIDIModelToken.forward = MIDIModel.forward_token
 
-
-def export_onnx(model, model_inputs, input_names, output_names, dynamic_axes, path):
+def export_onnx(model, model_inputs, input_names, output_names, dynamic_axes, meta_data, path):
     import onnx
     from onnxsim import simplify
     torch.onnx.export(model,  # model being run
@@ -41,14 +57,40 @@ def export_onnx(model, model_inputs, input_names, output_names, dynamic_axes, pa
     onnx_model = onnx.load(path)
     model_simp, check = simplify(onnx_model)
     assert check, "Simplified ONNX model could not be validated"
+    for k, v in meta_data.items():
+        meta = model_simp.metadata_props.add()
+        meta.key, meta.value = k, str(v)
     onnx.save(model_simp, path)
     print('finished exporting onnx')
+
+
+def get_past_kv(config: LlamaConfig, batch_size=1, past_seq_len=16, torch_dtype= torch.float32, device="cpu"):
+    head_size = config.hidden_size // config.num_attention_heads
+    past_kv = [
+        (
+            torch.rand(batch_size, config.num_attention_heads,
+                       past_seq_len, head_size, dtype=torch_dtype, device=device),
+            torch.rand(batch_size, config.num_attention_heads,
+                       past_seq_len, head_size, dtype=torch_dtype, device=device),
+        )
+        for _ in range(config.num_hidden_layers)
+    ]
+    input_names = list(
+        chain.from_iterable(
+            (f"past_key_values.{i}.key", f"past_key_values.{i}.value") for i in
+            range(config.num_hidden_layers)
+        )
+    )
+    output_names = list(
+        chain.from_iterable((f"present.{i}.key", f"present.{i}.value") for i in range(config.num_hidden_layers))
+    )
+    return past_kv, input_names, output_names
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--ckpt", type=str, default="model.ckpt", help="load ckpt"
+        "--ckpt", type=str, default="models/tv2m.ckpt", help="load ckpt"
     )
     parser.add_argument(
         "--config", type=str, default="tv2o-medium", choices=config_name_list, help="model config"
@@ -74,15 +116,41 @@ if __name__ == '__main__':
     model.eval()
     model_base = MIDIModelBase(model).eval()
     model_token = MIDIModelToken(model).eval()
+    meta_data = {"config_name": opt.config, "config": config}
+    past_kv_shape = {0: "batch", 2: "past_seq"}
+    present_kv_shape = {0: "batch", 2: "present_seq"}
     with torch.no_grad():
+        dynamic_axes = {
+            "x": {0: "batch", 1: "mid_seq", 2: "token_seq"},
+            "hidden": {0: "batch", 1: "mid_seq"}
+        }
         x = torch.randint(tokenizer.vocab_size, (1, 16, tokenizer.max_token_seq), dtype=torch.int64, device="cpu")
-        export_onnx(model_base, x, ["x"], ["hidden"], {"x": {0: "batch", 1: "mid_seq", 2: "token_seq"},
-                                                       "hidden": {0: "batch", 1: "mid_seq", 2: "emb"}},
-                    opt.model_base_out)
+        past_kv, input_names, output_names= get_past_kv(config.net_config, past_seq_len=16,
+                                                        torch_dtype=torch.float32)
+        for name in input_names:
+            dynamic_axes[name] = past_kv_shape
+        for name in output_names:
+            dynamic_axes[name] = present_kv_shape
+        input_names = [ "x"] + input_names
+        output_names = ["hidden"] + output_names
+        export_onnx(model_base, (x, past_kv),
+                    input_names, output_names, dynamic_axes, meta_data, opt.model_base_out)
 
-        hidden = torch.randn(1, config.n_embd, device="cpu")
-        x = torch.randint(tokenizer.vocab_size, (1, tokenizer.max_token_seq), dtype=torch.int64, device="cpu")
-        export_onnx(model_token, (hidden, x), ["hidden", "x"], ["y"], {"x": {0: "batch", 1: "token_seq"},
-                                                                       "hidden": {0: "batch", 1: "emb"},
-                                                                       "y": {0: "batch", 1: "token_seq1", 2: "voc"}},
-                    opt.model_token_out)
+        dynamic_axes = {
+            "x": {0: "batch", 1: "token_seq"},
+            "hidden": {0: "batch", 1: "states"},
+            "y": {0: "batch", 1: "token_seq1"}
+        }
+        hidden = torch.randn(1, 1, config.n_embd, device="cpu")
+        x = torch.randint(tokenizer.vocab_size, (1, tokenizer.max_token_seq //2), dtype=torch.int64, device="cpu")
+        past_kv, input_names, output_names = get_past_kv(config.net_token_config,
+                                                         past_seq_len=(tokenizer.max_token_seq // 2),
+                                                         torch_dtype=torch.float32)
+        for name in input_names:
+            dynamic_axes[name] = past_kv_shape
+        for name in output_names:
+            dynamic_axes[name] = present_kv_shape
+        input_names = ["hidden", "x"] + input_names
+        output_names = ["y"] + output_names
+        export_onnx(model_token, (hidden, x, past_kv),
+                    input_names, output_names, dynamic_axes, meta_data, opt.model_token_out)
