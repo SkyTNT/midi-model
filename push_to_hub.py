@@ -8,7 +8,7 @@ from midi_model import config_name_list, MIDIModelConfig, MIDIModel
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--ckpt", type=str, default="models/test2/model.safetensors", help="load ckpt"
+        "--ckpt", type=str, default="", help="load ckpt"
     )
     parser.add_argument(
         "--config", type=str, default="auto",
