@@ -698,7 +698,7 @@ if __name__ == "__main__":
             for i in range(OUTPUT_BATCH_SIZE):
                 with gr.TabItem(f"output {i + 1}") as tab1:
                     output_midi_visualizer = gr.HTML(elem_id=f"midi_visualizer_container_{i}")
-                    output_audio = gr.Audio(label="output audio", format="mp3", elem_id=f"midi_audio_{i}")
+                    output_audio = gr.Audio(label="output audio", format="wav", elem_id=f"midi_audio_{i}")
                     output_midi = gr.File(label="output midi", file_types=[".mid"])
                     midi_outputs.append(output_midi)
                     audio_outputs.append(output_audio)
