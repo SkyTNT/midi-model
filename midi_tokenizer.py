@@ -1,4 +1,5 @@
 import random
+from typing import Dict, Any
 
 import PIL.Image
 import numpy as np
@@ -32,6 +33,20 @@ class MIDITokenizerV1:
         self.id_events = {i: e for e, i in self.event_ids.items()}
         self.parameter_ids = {p: allocate_ids(s) for p, s in self.event_parameters.items()}
         self.max_token_seq = max([len(ps) for ps in self.events.values()]) + 1
+
+    def to_dict(self) -> Dict[str, Any]:
+        d = {
+            "version":self.version,
+            "optimise_midi":self.optimise_midi,
+            "vocab_size": self.vocab_size,
+            "events": self.events,
+            "event_parameters": self.event_parameters,
+            "max_token_seq": self.max_token_seq,
+            "pad_id": self.pad_id,
+            "bos_id": self.bos_id,
+            "eos_id": self.eos_id,
+        }
+        return d
 
     def set_optimise_midi(self, optimise_midi=True):
         self.optimise_midi = optimise_midi
@@ -518,6 +533,20 @@ class MIDITokenizerV2:
         self.id_events = {i: e for e, i in self.event_ids.items()}
         self.parameter_ids = {p: allocate_ids(s) for p, s in self.event_parameters.items()}
         self.max_token_seq = max([len(ps) for ps in self.events.values()]) + 1
+
+    def to_dict(self) -> Dict[str, Any]:
+        d = {
+            "version":self.version,
+            "optimise_midi":self.optimise_midi,
+            "vocab_size": self.vocab_size,
+            "events": self.events,
+            "event_parameters": self.event_parameters,
+            "max_token_seq": self.max_token_seq,
+            "pad_id": self.pad_id,
+            "bos_id": self.bos_id,
+            "eos_id": self.eos_id,
+        }
+        return d
 
     def set_optimise_midi(self, optimise_midi=True):
         self.optimise_midi = optimise_midi

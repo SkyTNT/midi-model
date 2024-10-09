@@ -154,3 +154,4 @@ cython_debug/
 output.mid
 /outputs/
 /soundfont.sf2
+/test.py

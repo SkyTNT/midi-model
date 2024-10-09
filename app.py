@@ -4,6 +4,7 @@ import json
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Union, Optional
 
 import gradio as gr
@@ -13,6 +14,7 @@ import torch.nn.functional as F
 import tqdm
 from huggingface_hub import hf_hub_download
 from transformers import DynamicCache
+from safetensors.torch import load_file as safe_load_file
 
 import MIDI
 from midi_model import MIDIModel, config_name_list, MIDIModelConfig
@@ -293,10 +295,21 @@ def undo_continuation(mid_seq, continuation_state):
 
 def load_model(path, model_config, lora_path):
     global model, tokenizer
-    model = MIDIModel(config=MIDIModelConfig.from_name(model_config))
+    if model_config == "auto":
+        config_path = Path(path).parent / "config.json"
+        if config_path.exists():
+            config=MIDIModelConfig.from_json_file(config_path)
+        else:
+            return "can not find config.json, please specify config"
+    else:
+        config = MIDIModelConfig.from_name(model_config)
+    model = MIDIModel(config=config)
     tokenizer = model.tokenizer
-    ckpt = torch.load(path, map_location="cpu")
-    state_dict = ckpt.get("state_dict", ckpt)
+    if path.endswith(".safetensors"):
+        state_dict = safe_load_file(path)
+    else:
+        ckpt = torch.load(path, map_location="cpu")
+        state_dict = ckpt.get("state_dict", ckpt)
     model.load_state_dict(state_dict, strict=False)
     if lora_path:
         model = model.load_merge_lora(lora_path)
@@ -305,7 +318,11 @@ def load_model(path, model_config, lora_path):
 
 
 def get_model_path():
-    model_paths = sorted(glob.glob("**/*.ckpt", recursive=True))
+    ckpt_files = glob.glob("**/*.ckpt", recursive=True)
+    bin_files = glob.glob("**/*.bin", recursive=True)
+    safetensors_files = glob.glob("**/*.safetensors", recursive=True)
+    model_paths = sorted(ckpt_files + bin_files + safetensors_files)
+    model_paths = [model_path for model_path in model_paths if "adapter_model" not in model_path]  # lora
     return gr.Dropdown(choices=model_paths)
 
 def get_lora_path():
@@ -371,7 +388,7 @@ if __name__ == "__main__":
         with gr.Accordion(label="Model option", open=True):
             load_model_path_btn = gr.Button("Get Models")
             model_path_input = gr.Dropdown(label="model")
-            model_config_input = gr.Dropdown(label="config", choices=config_name_list, value="tv2o-medium")
+            model_config_input = gr.Dropdown(label="config",choices=["auto"] + config_name_list, value="auto")
             load_model_path_btn.click(get_model_path, [], model_path_input)
             load_lora_path_btn = gr.Button("Get Loras")
             lora_path_input = gr.Dropdown(label="lora")

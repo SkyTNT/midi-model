@@ -2,7 +2,7 @@ import argparse
 import os
 import random
 from pathlib import Path
-from typing import Union, Optional
+from typing import Union
 
 import lightning as pl
 import numpy as np
@@ -104,11 +104,11 @@ def get_linear_schedule_with_warmup(optimizer, num_warmup_steps, num_training_st
     return LambdaLR(optimizer, lr_lambda, last_epoch)
 
 
-class TrainMIDIModel(MIDIModel):
-    def __init__(self, config: MIDIModelConfig, flash=False,
+class TrainMIDIModel(MIDIModel, pl.LightningModule):
+    def __init__(self, config: MIDIModelConfig,
                  lr=2e-4, weight_decay=0.01, warmup=1e3, max_step=1e6, sample_seq=False,
                  gen_example_interval=1, example_batch=8):
-        super(TrainMIDIModel, self).__init__(config, flash=flash)
+        super(TrainMIDIModel, self).__init__(config)
         self.lr = lr
         self.weight_decay = weight_decay
         self.warmup = warmup
@@ -260,6 +260,7 @@ class TrainMIDIModel(MIDIModel):
             save_dir = os.path.join(save_dir, str(name), version)
         else:
             save_dir = trainer.default_root_dir
+        self.config.save_pretrained(os.path.join(save_dir, "checkpoints"))
         if self._hf_peft_config_loaded:
             self.save_peft(os.path.join(save_dir, "lora"))
         self.gen_example_count += 1
@@ -292,7 +293,7 @@ if __name__ == '__main__':
         "--ckpt", type=str, default="", help="load ckpt"
     )
     parser.add_argument(
-        "--config", type=str, default="tv2o-medium", choices=config_name_list, help="model config"
+        "--config", type=str, default="tv2o-medium", help="model config name or file"
     )
     parser.add_argument(
         "--task", type=str, default="train", choices=["train", "lora"], help="Full train or lora"
@@ -390,7 +391,10 @@ if __name__ == '__main__':
         os.mkdir("sample")
     pl.seed_everything(opt.seed)
     print("---load dataset---")
-    config = MIDIModelConfig.from_name(opt.config)
+    if opt.config in config_name_list:
+        config = MIDIModelConfig.from_name(opt.config)
+    else:
+        config = MIDIModelConfig.from_json_file(opt.config)
     tokenizer = config.tokenizer
     midi_list = get_midi_list(opt.data)
     random.shuffle(midi_list)
@@ -421,7 +425,9 @@ if __name__ == '__main__':
         collate_fn=collate_fn
     )
     print(f"train: {len(train_dataset)}  val: {len(val_dataset)}")
-    model = TrainMIDIModel(config, flash=True, lr=opt.lr, weight_decay=opt.weight_decay,
+    torch.backends.cuda.enable_mem_efficient_sdp(True)
+    torch.backends.cuda.enable_flash_sdp(True)
+    model = TrainMIDIModel(config, lr=opt.lr, weight_decay=opt.weight_decay,
                            warmup=opt.warmup_step, max_step=opt.max_step,
                            sample_seq=opt.sample_seq, gen_example_interval=opt.gen_example_interval,
                            example_batch=opt.batch_size_gen_example)

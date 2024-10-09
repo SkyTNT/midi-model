@@ -1,28 +1,56 @@
 import json
-from typing import Union
+from typing import Union, Dict, Any
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import tqdm
-import lightning  as pl
 from peft import PeftConfig, LoraModel, load_peft_weights, set_peft_model_state_dict
-from transformers import LlamaModel, LlamaConfig, DynamicCache
-from transformers.integrations import PeftAdapterMixin
+from transformers import LlamaModel, LlamaConfig, DynamicCache, PretrainedConfig, PreTrainedModel
 
 from midi_tokenizer import MIDITokenizerV1, MIDITokenizerV2, MIDITokenizer
 
 config_name_list = ["tv1-medium", "tv2-medium", "tv2o-medium", "tv2-large", "tv2o-large"]
 
 
-class MIDIModelConfig:
-    def __init__(self, tokenizer: Union[MIDITokenizerV1, MIDITokenizerV2],
-                 net_config: LlamaConfig, net_token_config: LlamaConfig):
-        self.tokenizer = tokenizer
-        self.net_config = net_config
-        self.net_token_config = net_token_config
-        self.n_embd = net_token_config.hidden_size
+class MIDIModelConfig(PretrainedConfig):
+    model_type = "midi_model"
+
+    def __init__(self,
+                 tokenizer: Union[MIDITokenizerV1, MIDITokenizerV2, Dict]=None,
+                 net_config: Union[LlamaConfig, Dict]=None,
+                 net_token_config: Union[LlamaConfig, Dict]=None,
+                 **kwargs):
+        super().__init__(**kwargs)
+        if tokenizer:
+            if isinstance(tokenizer, dict):
+                self.tokenizer = MIDITokenizer(tokenizer["version"])
+                self.tokenizer.set_optimise_midi(tokenizer["optimise_midi"])
+            else:
+                self.tokenizer = tokenizer
+        else:
+            self.tokenizer = MIDITokenizer()
+        if net_config:
+            if isinstance(net_config, dict):
+                self.net_config = LlamaConfig(**net_config)
+            else:
+                self.net_config = net_config
+        else:
+            self.net_config = LlamaConfig()
+        if net_token_config:
+            if isinstance(net_token_config, dict):
+                self.net_token_config = LlamaConfig(**net_token_config)
+            else:
+                self.net_token_config = net_token_config
+        else:
+            self.net_token_config = LlamaConfig()
+        self.n_embd = self.net_token_config.hidden_size
+
+    def to_dict(self) -> Dict[str, Any]:
+        d = super().to_dict()
+        d["tokenizer"] = self.tokenizer.to_dict()
+        return d
 
     def __str__(self):
         d = {
@@ -68,12 +96,11 @@ class MIDIModelConfig:
             raise ValueError(f"Unknown model size {size}")
 
 
-class MIDIModel(pl.LightningModule, PeftAdapterMixin):
-    def __init__(self, config: MIDIModelConfig, flash=False, *args, **kwargs):
-        super(MIDIModel, self).__init__()
-        if flash:
-            torch.backends.cuda.enable_mem_efficient_sdp(True)
-            torch.backends.cuda.enable_flash_sdp(True)
+class MIDIModel(PreTrainedModel):
+    config_class = MIDIModelConfig
+
+    def __init__(self, config: MIDIModelConfig, *args, **kwargs):
+        super(MIDIModel, self).__init__(config, *args, **kwargs)
         self.tokenizer = config.tokenizer
         self.net = LlamaModel(config.net_config)
         self.net_token = LlamaModel(config.net_token_config)
