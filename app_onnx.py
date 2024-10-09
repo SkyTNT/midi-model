@@ -18,7 +18,7 @@ import MIDI
 from midi_synthesizer import MidiSynthesizer
 from midi_tokenizer import MIDITokenizer
 
-VERSION = "v1.3.3"
+VERSION = "v1.3.4"
 MAX_SEED = np.iinfo(np.int32).max
 
 rt.set_default_logger_severity(3)
