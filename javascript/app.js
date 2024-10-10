@@ -615,10 +615,13 @@ customElements.define('midi-visualizer', MidiVisualizer);
                     midi_visualizer.bindWaveformCursor(midi_audio_cursor)
                     midi_audio_cursor_inited = midi_audio_cursor
                 }
-                let midi_audio_audio = midi_audio.deepQuerySelector("audio");
-                if(!!midi_audio_audio && midi_audio_audio_inited!==midi_audio_audio){
-                    midi_visualizer.bindAudioPlayer(midi_audio_audio)
-                    midi_audio_audio_inited = midi_audio_audio
+                let midi_audio_waveform = midi_audio.deepQuerySelector("#waveform");
+                if(!!midi_audio_waveform){
+                    let midi_audio_audio = midi_audio_waveform.deepQuerySelector("audio");
+                    if(!!midi_audio_audio && midi_audio_audio_inited!==midi_audio_audio){
+                        midi_visualizer.bindAudioPlayer(midi_audio_audio)
+                        midi_audio_audio_inited = midi_audio_audio
+                    }
                 }
             }
         });

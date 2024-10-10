@@ -725,7 +725,8 @@ if __name__ == "__main__":
         port = opt.port
         if port == -1:
             port = None
-        app.launch(server_port=port, share=opt.share, inbrowser=True)
+        # load_javascript not work on ssr mode
+        app.launch(server_port=port, share=opt.share, inbrowser=True, ssr_mode=False)
     except Exception as e:
         print(e)
         input("Failed to launch webui.\nPress any key to continue...")

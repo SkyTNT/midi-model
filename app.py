@@ -501,5 +501,6 @@ if __name__ == "__main__":
         stop_btn.click(None, [], [], cancels=run_event, queue=False)
         undo_btn.click(undo_continuation, [output_midi_seq, output_continuation_state],
                        [output_midi_seq, output_continuation_state, js_msg], queue=False)
-    app.launch(server_port=opt.port, inbrowser=True, share=opt.share)
+    # load_javascript not work on ssr mode
+    app.launch(server_port=opt.port, inbrowser=True, share=opt.share, ssr_mode=False)
     thread_pool.shutdown()
