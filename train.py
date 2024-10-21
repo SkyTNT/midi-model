@@ -83,12 +83,11 @@ class MidiDataset(Dataset):
         mid = torch.from_numpy(mid)
         return mid
 
-
-def collate_fn(batch):
-    max_len = max([len(mid) for mid in batch])
-    batch = [F.pad(mid, (0, 0, 0, max_len - mid.shape[0]), mode="constant", value=tokenizer.pad_id) for mid in batch]
-    batch = torch.stack(batch)
-    return batch
+    def collate_fn(self, batch):
+        max_len = max([len(mid) for mid in batch])
+        batch = [F.pad(mid, (0, 0, 0, max_len - mid.shape[0]), mode="constant", value=self.tokenizer.pad_id) for mid in batch]
+        batch = torch.stack(batch)
+        return batch
 
 
 def get_linear_schedule_with_warmup(optimizer, num_warmup_steps, num_training_steps, last_epoch=-1):
@@ -413,7 +412,7 @@ if __name__ == '__main__':
         persistent_workers=True,
         num_workers=opt.workers_train,
         pin_memory=True,
-        collate_fn=collate_fn
+        collate_fn=train_dataset.collate_fn
     )
     val_dataloader = DataLoader(
         val_dataset,
@@ -422,7 +421,7 @@ if __name__ == '__main__':
         persistent_workers=True,
         num_workers=opt.workers_val,
         pin_memory=True,
-        collate_fn=collate_fn
+        collate_fn=val_dataset.collate_fn
     )
     print(f"train: {len(train_dataset)}  val: {len(val_dataset)}")
     torch.backends.cuda.enable_mem_efficient_sdp(True)
