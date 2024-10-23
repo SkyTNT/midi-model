@@ -11,19 +11,19 @@ class MidiSynthesizer:
         fl = fluidsynth.Synth(samplerate=float(sample_rate))
         sfid = fl.sfload(soundfont_path)
         self.devices = [[fl, sfid, False]]
-        self.file_lock = Lock()
+        self.devices_lock = Lock()
 
     def get_fluidsynth(self):
-        for device in self.devices:
-            if not device[2]:
-                device[2] = True
-                return device
-        with self.file_lock:
+        with self.devices_lock:
+            for device in self.devices:
+                if not device[2]:
+                    device[2] = True
+                    return device
             fl = fluidsynth.Synth(samplerate=float(self.sample_rate))
             sfid = fl.sfload(self.soundfont_path)
-        device = [fl, sfid, True]
-        self.devices.append(device)
-        return device
+            device = [fl, sfid, True]
+            self.devices.append(device)
+            return device
 
     def release_fluidsynth(self, device):
         device[0].system_reset()
