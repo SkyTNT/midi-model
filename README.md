@@ -18,7 +18,7 @@
 
 ## Pretrained model
 
-[huggingface](https://huggingface.co/skytnt/midi-model/blob/main/model.ckpt)
+[huggingface](https://huggingface.co/skytnt/midi-model-tv2o-medium)
 
 ## Dataset
 
