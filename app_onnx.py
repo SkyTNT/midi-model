@@ -18,7 +18,7 @@ import MIDI
 from midi_synthesizer import MidiSynthesizer
 from midi_tokenizer import MIDITokenizer
 
-VERSION = "v1.3.4"
+VERSION = "v1.3.5"
 MAX_SEED = np.iinfo(np.int32).max
 
 rt.set_default_logger_severity(3)
@@ -57,6 +57,10 @@ def apply_io_binding(model: rt.InferenceSession, inputs, outputs, batch_size, pa
             present_name = name.replace("past_key_values", "present")
             if present_name in outputs:
                 v = outputs[present_name]
+                if past_len > 4095:
+                    v = v.numpy()
+                    v = v[:, :, -4095:]
+                    v = rt.OrtValue.ortvalue_from_numpy(v, device_type=device)
             else:
                 v = rt.OrtValue.ortvalue_from_shape_and_type(
                     (batch_size, input_.shape[1], past_len, input_.shape[3]),
@@ -108,6 +112,7 @@ def generate(model, prompt=None, batch_size=1, max_len=512, temp=1.0, top_p=0.98
             prompt = np.pad(prompt, ((0, 0), (0, 0), (0, max_token_seq - prompt.shape[-1])),
                             mode="constant", constant_values=tokenizer.pad_id)
         input_tensor = prompt
+    input_tensor = input_tensor[:, -4096:]
     cur_len = input_tensor.shape[1]
     bar = tqdm.tqdm(desc="generating", total=max_len - cur_len)
     model0_inputs = {}
@@ -298,7 +303,9 @@ def run(model_name, tab, mid_seq, continuation_state, continuation_select, instr
                                  remap_track_channel=remap_track_channel,
                                  add_default_instr=add_default_instr,
                                  remove_empty_channels=remove_empty_channels)
-        mid = mid[:int(midi_events)]
+        midi_events = int(midi_events)
+        if midi_events <= 4096:
+            mid = mid[:midi_events]
         mid = np.asarray([mid] * OUTPUT_BATCH_SIZE, dtype=np.int64)
         mid_seq = mid.tolist()
     elif tab == 2 and mid_seq is not None:
@@ -654,7 +661,8 @@ if __name__ == "__main__":
                 ], [input_instruments, input_drum_kit])
             with gr.TabItem("midi prompt") as tab2:
                 input_midi = gr.File(label="input midi", file_types=[".midi", ".mid"], type="binary")
-                input_midi_events = gr.Slider(label="use first n midi events as prompt", minimum=1, maximum=512,
+                input_midi_events = gr.Slider(label="use first n midi events as prompt (all if 4097)", minimum=1,
+                                              maximum=4097,
                                               step=1,
                                               value=128)
                 input_reduce_cc_st = gr.Checkbox(label="reduce control_change and set_tempo events", value=True)

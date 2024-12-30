@@ -50,6 +50,7 @@ def generate(prompt=None, batch_size=1, max_len=512, temp=1.0, top_p=0.98, top_k
             prompt = np.pad(prompt, ((0, 0), (0, 0), (0, max_token_seq - prompt.shape[-1])),
                             mode="constant", constant_values=tokenizer.pad_id)
         input_tensor = torch.from_numpy(prompt).to(dtype=torch.long, device=model.device)
+    input_tensor = input_tensor[:, -4096:]
     cur_len = input_tensor.shape[1]
     bar = tqdm.tqdm(desc="generating", total=max_len - cur_len)
     cache1 = DynamicCache()
@@ -185,7 +186,9 @@ def run(tab, mid_seq, continuation_state, continuation_select, instruments, drum
                                  remap_track_channel=remap_track_channel,
                                  add_default_instr=add_default_instr,
                                  remove_empty_channels=remove_empty_channels)
-        mid = mid[:int(midi_events)]
+        midi_events = int(midi_events)
+        if midi_events <= 4096:
+            mid = mid[:midi_events]
         mid = np.asarray([mid] * OUTPUT_BATCH_SIZE, dtype=np.int64)
         mid_seq = mid.tolist()
     elif tab == 2 and mid_seq is not None:
@@ -434,7 +437,8 @@ if __name__ == "__main__":
                 ], [input_instruments, input_drum_kit])
             with gr.TabItem("midi prompt") as tab2:
                 input_midi = gr.File(label="input midi", file_types=[".midi", ".mid"], type="binary")
-                input_midi_events = gr.Slider(label="use first n midi events as prompt", minimum=1, maximum=512,
+                input_midi_events = gr.Slider(label="use first n midi events as prompt (all if 4097)", minimum=1,
+                                              maximum=4097,
                                               step=1,
                                               value=128)
                 input_reduce_cc_st = gr.Checkbox(label="reduce control_change and set_tempo events", value=True)
